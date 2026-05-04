@@ -63,9 +63,25 @@ function SessionPage() {
   const persons = ensurePersons(session);
   const activePersons = persons.filter((p) => !p.leftAt);
 
-  const completeSession = () => {
+  const completeSession = async () => {
     const bill = sessionsApi.complete(session.id);
-    if (bill) nav({ to: "/bill/$id", params: { id: session.id } });
+    if (bill) {
+      const formattedItems = bill.lines.map(l => ({
+        name: l.label,
+        qty: 1,
+        price: l.amount,
+        subtotal: l.amount
+      }));
+      // Mark as completed in the Kitchen/Billing orders table and attach the computed bill
+      await supabase.from("orders").update({ 
+        status: "completed",
+        bill_items: formattedItems,
+        bill_total: bill.total,
+        bill_final: bill.total,
+        bill_discount: 0
+      }).eq("session_id", session.id);
+      nav({ to: "/bill/$id", params: { id: session.id } });
+    }
   };
 
   const handleAdd = (kind: "adult" | "kid") => {

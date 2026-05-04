@@ -24,7 +24,7 @@ export const Route = createFileRoute("/new")({
 });
 
 // Default roster of cafe hosts (staff on shift). Can be extended on the fly.
-const DEFAULT_HOSTS = ["Aarav", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
+const DEFAULT_HOSTS = ["Sanjay", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
 
 function NewSession() {
   const nav = useNavigate();

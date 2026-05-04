@@ -4,7 +4,7 @@ import { sessionsApi } from "@/lib/sessions";
 import type { Session } from "@/lib/types";
 
 // Keep in sync with the default roster used in /new.
-const DEFAULT_HOSTS = ["Aarav", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
+const DEFAULT_HOSTS = ["Sanjay", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
 
 interface HostInfo {
   name: string;
