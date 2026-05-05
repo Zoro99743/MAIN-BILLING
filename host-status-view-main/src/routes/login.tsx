@@ -1,15 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Smartphone, User, KeyRound, ArrowRight } from "lucide-react";
+import { User, KeyRound, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStaff } from "@/components/AuthGuard";
+import { supabase } from "@/lib/supabase";
+import { EMPLOYEES } from "@/lib/employees";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
       { title: "Staff Login — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Secure staff login with mobile OTP." },
+      { name: "description", content: "Secure staff login." },
     ],
   }),
   component: LoginPage,
@@ -18,29 +20,46 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const nav = useNavigate();
   const { staff, setStaff } = useStaff();
-  const [step, setStep] = useState<"details" | "otp">("details");
-  const [name, setName] = useState("");
-  const [mobile, setMobile] = useState("");
-  const [otp, setOtp] = useState("");
-  const [issuedOtp, setIssuedOtp] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (staff) nav({ to: "/" }); }, [staff, nav]);
 
-  const requestOtp = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return toast.error("Enter your name");
-    if (!/^\d{10}$/.test(mobile)) return toast.error("Enter a 10-digit mobile number");
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setIssuedOtp(code);
-    setStep("otp");
-    toast.success(`OTP sent (dev mode): ${code}`, { duration: 8000 });
-  };
+    if (!username.trim() || !password.trim()) {
+      return toast.error("Enter both username and password");
+    }
 
-  const verify = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otp !== issuedOtp) return toast.error("Invalid OTP");
-    setStaff({ name: name.trim(), mobile, loggedInAt: Date.now() });
-    toast.success("Welcome");
+    setLoading(true);
+    
+    // Check local employees list (which is our source of truth requested by user)
+    const validEmployee = EMPLOYEES.find(
+      (emp) => emp.username.toLowerCase() === username.trim().toLowerCase() && emp.passwordId === password.trim()
+    );
+
+    if (!validEmployee) {
+      setLoading(false);
+      return toast.error("Invalid username or password");
+    }
+
+    // Save/sync this valid employee to the Supabase database
+    try {
+      await supabase.from("staff").upsert({
+        id: validEmployee.passwordId, // using their ID as primary key
+        name: validEmployee.username,
+        role: validEmployee.role,
+        pin: validEmployee.passwordId, // store password in pin
+      }, { onConflict: "id" });
+    } catch (err) {
+      console.error("Failed to sync to db:", err);
+      // Proceed anyway, DB sync is optional for logging in if it's in our valid list
+    }
+
+    setStaff({ name: validEmployee.username, mobile: "", loggedInAt: Date.now() });
+    toast.success(`Welcome back, ${validEmployee.username}!`);
     nav({ to: "/" });
   };
 
@@ -57,30 +76,38 @@ function LoginPage() {
             <p className="text-sm text-muted-foreground">For PlayHouse Cafe — Staff Login</p>
           </div>
 
-          {step === "details" ? (
-            <form onSubmit={requestOtp} className="space-y-4">
-              <Field icon={<User className="h-4 w-4" />} label="Name">
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" className="w-full bg-transparent outline-none" />
-              </Field>
-              <Field icon={<Smartphone className="h-4 w-4" />} label="Mobile Number">
-                <input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile" inputMode="numeric" className="w-full bg-transparent outline-none" />
-              </Field>
-              <PrimaryButton>Send OTP <ArrowRight className="h-4 w-4" /></PrimaryButton>
-            </form>
-          ) : (
-            <form onSubmit={verify} className="space-y-4">
-              <p className="text-center text-sm text-muted-foreground">
-                Enter the 6-digit code sent to <span className="font-medium text-foreground">{mobile}</span>
-              </p>
-              <Field icon={<KeyRound className="h-4 w-4" />} label="One-Time Password">
-                <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" inputMode="numeric" className="w-full bg-transparent text-center text-2xl tracking-[0.5em] outline-none" />
-              </Field>
-              <PrimaryButton>Verify & Continue</PrimaryButton>
-              <button type="button" onClick={() => setStep("details")} className="w-full text-xs text-muted-foreground hover:text-foreground">
-                Change details
-              </button>
-            </form>
-          )}
+          <form onSubmit={handleLogin} className="space-y-4">
+            <Field icon={<User className="h-4 w-4" />} label="Username (First Name)">
+              <input 
+                value={username} 
+                onChange={(e) => setUsername(e.target.value)} 
+                placeholder="e.g. Praveenbalaji" 
+                className="w-full bg-transparent outline-none" 
+              />
+            </Field>
+            <Field icon={<KeyRound className="h-4 w-4" />} label="Password (ID)">
+              <div className="flex w-full items-center">
+                <input 
+                  type={showPassword ? "text" : "password"}
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  placeholder="e.g. PHPS03" 
+                  className="w-full bg-transparent outline-none" 
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-muted-foreground hover:text-foreground outline-none"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </Field>
+            <PrimaryButton disabled={loading}>
+              {loading ? "Verifying..." : "Login"} <ArrowRight className="h-4 w-4" />
+            </PrimaryButton>
+          </form>
         </div>
       </main>
     </div>
@@ -99,9 +126,9 @@ function Field({ icon, label, children }: { icon: React.ReactNode; label: string
   );
 }
 
-function PrimaryButton({ children }: { children: React.ReactNode }) {
+function PrimaryButton({ children, disabled }: { children: React.ReactNode; disabled?: boolean }) {
   return (
-    <button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition hover:scale-[1.01] active:scale-[0.99]" style={{ background: "var(--gradient-primary)" }}>
+    <button type="submit" disabled={disabled} className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50" style={{ background: "var(--gradient-primary)" }}>
       {children}
     </button>
   );

@@ -2,7 +2,7 @@
 // Every person has their own joinedAt (and optional leftAt). For each person:
 //   • first 60 minutes of THEIR presence is billed at their `firstHourRate`
 //   • every minute beyond that is billed at the session's `subsequentRate`
-// All amounts are pro-rated to the minute (fair, exact).
+// All amounts are pro-rated to the SECOND (exact, no rounding of time).
 //
 // If a session has no `persons` array (legacy data), we synthesise one from
 // `adults` + `kids` + `pricing.memberRates` so old sessions still bill correctly.
@@ -10,8 +10,23 @@
 import type { Bill, BillLine, Person, Session } from "./types";
 import { MENU_ITEMS } from "./types";
 
+const MS_PER_SEC = 1_000;
 const MS_PER_MIN = 60_000;
+const MS_PER_HOUR = 3_600_000;
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** Format seconds as "Xh Ym Zs" for receipt labels */
+function fmtDuration(ms: number): string {
+  const totalSec = Math.floor(ms / MS_PER_SEC);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+  return parts.join(" ");
+}
 
 export function ensurePersons(s: Session): Person[] {
   if (s.persons && s.persons.length) return s.persons;
@@ -41,7 +56,10 @@ export function ensurePersons(s: Session): Person[] {
 
 export interface PersonCharge {
   person: Person;
-  presentMin: number;
+  presentMs: number;       // exact milliseconds present
+  presentMin: number;      // exact fractional minutes (for legacy compat)
+  firstHourMs: number;     // ms billed at first-hour rate
+  extraMs: number;         // ms billed at subsequent rate
   firstHourMin: number;
   extraMin: number;
   firstHourAmt: number;
@@ -52,14 +70,26 @@ export interface PersonCharge {
 export function chargeForPerson(p: Person, sessionEnd: number, subsequentRate: number): PersonCharge {
   const end = Math.min(p.leftAt ?? sessionEnd, sessionEnd);
   const presentMs = Math.max(0, end - p.joinedAt);
+
+  // Split at exactly 1 hour (3 600 000 ms) — no rounding
+  const firstHourMs = Math.min(MS_PER_HOUR, presentMs);
+  const extraMs = Math.max(0, presentMs - MS_PER_HOUR);
+
+  // Amounts: divide by MS_PER_HOUR for exact fractional hours
+  const firstHourAmt = round((firstHourMs / MS_PER_HOUR) * p.firstHourRate);
+  const extraAmt = round((extraMs / MS_PER_HOUR) * subsequentRate);
+
+  // Keep minute fields for any legacy callers
   const presentMin = presentMs / MS_PER_MIN;
-  const firstHourMin = Math.min(60, presentMin);
-  const extraMin = Math.max(0, presentMin - 60);
-  const firstHourAmt = round((firstHourMin / 60) * p.firstHourRate);
-  const extraAmt = round((extraMin / 60) * subsequentRate);
+  const firstHourMin = firstHourMs / MS_PER_MIN;
+  const extraMin = extraMs / MS_PER_MIN;
+
   return {
     person: p,
+    presentMs,
     presentMin,
+    firstHourMs,
+    extraMs,
     firstHourMin,
     extraMin,
     firstHourAmt,
@@ -77,18 +107,22 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   const charges = persons.map((p) => chargeForPerson(p, sessionEnd, subsequent));
 
   for (const c of charges) {
-    if (c.presentMin <= 0) continue;
-    const totalHrs = round(c.presentMin / 60);
-    // One line per person — easy to read on receipt.
+    if (c.presentMs <= 0) continue;
+
+    // qty: exact fractional hours (NOT rounded to 2dp) — so receipt math is consistent
+    const qty = c.presentMs / MS_PER_HOUR;
+
+    // Label: show human-readable exact duration instead of rounded hours
     const desc =
-      c.extraMin > 0
-        ? `Person ${c.person.label} (1h@₹${c.person.firstHourRate} + ${(c.extraMin / 60).toFixed(2)}h@₹${subsequent})`
-        : `Person ${c.person.label}`;
+      c.extraMs > 0
+        ? `Person ${c.person.label} (1h@₹${c.person.firstHourRate} + ${fmtDuration(c.extraMs)}@₹${subsequent})`
+        : `Person ${c.person.label} (${fmtDuration(c.presentMs)})`;
+
     lines.push({
       label: desc,
-      qty: totalHrs,
-      rate: c.extraMin > 0 ? subsequent : c.person.firstHourRate,
-      amount: c.total,
+      qty,                          // exact — no toFixed/round on qty
+      rate: subsequent,
+      amount: c.total,              // amount is always the source of truth
     });
   }
 
@@ -107,7 +141,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   }
 
   const subtotal = round(lines.reduce((a, l) => a + l.amount, 0));
-  const totalMin = Math.max(0, (sessionEnd - s.startedAt) / MS_PER_MIN);
+  const totalMs = Math.max(0, sessionEnd - s.startedAt);
 
   return {
     sessionId: s.id,
@@ -116,7 +150,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
     tables: s.tableIds,
     startedAt: s.startedAt,
     endedAt: sessionEnd,
-    durationMin: round(totalMin),
+    durationMin: round(totalMs / MS_PER_MIN),
     lines,
     subtotal,
     total: subtotal,

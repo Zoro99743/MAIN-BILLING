@@ -24,7 +24,7 @@ export const Route = createFileRoute("/new")({
 });
 
 // Default roster of cafe hosts (staff on shift). Can be extended on the fly.
-const DEFAULT_HOSTS = ["Sanjay", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
+const DEFAULT_HOSTS = ["Praveenbalaji", "Vijayakumar", "Phebe"];
 
 function NewSession() {
   const nav = useNavigate();
@@ -186,7 +186,7 @@ function NewSession() {
     };
 
     const s = sessionsApi.create({
-      customerName: name.trim(),
+      customerName: name.trim().toUpperCase(),
       customerMobile: mobile,
       tableIds: tables,
       adults,
@@ -205,7 +205,6 @@ function NewSession() {
     }
 
     // 🚨 Always send order to Kitchen App's 'orders' table via Supabase
-    // Build items list: specific items if chosen, or a "Full menu offered" marker
     const itemsArr = selectAllMenu
       ? [{ name: "Full menu offered", qty: 1 }]
       : Object.entries(menuQty)
@@ -221,8 +220,6 @@ function NewSession() {
         table_number: tables.join(", "),
         customer_count: totalPersons,
         items: itemsArr,
-        // created_by is omitted — host website has no Supabase user session.
-        // The RLS policy now allows anon inserts so this will succeed.
       }).then(({ error }) => {
         if (error) console.error("Failed to send to kitchen:", error.message, error);
         else console.log("✅ Order sent to kitchen for table", tables.join(", "));
@@ -256,7 +253,13 @@ function NewSession() {
           <section className="glass space-y-4 rounded-2xl p-5">
             <h2 className="font-display text-lg font-semibold">Customer Details</h2>
             <Field label="Name">
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Customer name" className="w-full bg-transparent outline-none" />
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value.toUpperCase())}
+                placeholder="CUSTOMER NAME"
+                className="w-full bg-transparent uppercase outline-none placeholder:opacity-40"
+                style={{ textTransform: "uppercase" }}
+              />
             </Field>
             <Field label="Mobile">
               <input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="10-digit mobile" className="w-full bg-transparent outline-none" />
@@ -563,4 +566,3 @@ function Counter({ label, value, onChange, min = 0 }: { label: string; value: nu
     </div>
   );
 }
-
