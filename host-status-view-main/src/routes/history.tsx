@@ -8,12 +8,6 @@ import { computeBill } from "@/lib/billing";
 import { ArrowLeft, Clock } from "lucide-react";
 
 export const Route = createFileRoute("/history")({
-  head: () => ({
-    meta: [
-      { title: "History — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Past sessions and bills." },
-    ],
-  }),
   component: () => (<RequireAuth><HistoryPage /></RequireAuth>),
 });
 

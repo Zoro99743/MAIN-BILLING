@@ -8,12 +8,6 @@ import { supabase } from "@/lib/supabase";
 import { EMPLOYEES } from "@/lib/employees";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({
-    meta: [
-      { title: "Staff Login — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Secure staff login." },
-    ],
-  }),
   component: LoginPage,
 });
 

@@ -15,12 +15,6 @@ const searchSchema = z.object({ table: z.string().optional() });
 
 export const Route = createFileRoute("/new")({
   validateSearch: (s) => searchSchema.parse(s),
-  head: () => ({
-    meta: [
-      { title: "New Session — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Register a customer and assign tables." },
-    ],
-  }),
   component: () => (<RequireAuth><NewSession /></RequireAuth>),
 });
 

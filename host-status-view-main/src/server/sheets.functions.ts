@@ -1,4 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabase } from "../lib/supabase";
 
@@ -24,70 +23,61 @@ const sessionSchema = z.object({
   history: z.array(z.object({ at: z.number(), adults: z.number(), kids: z.number() })),
 });
 
-export const initSheet = createServerFn({ method: "POST" })
-  .handler(async () => {
-    // Legacy endpoint, kept for backwards compatibility so frontend doesn't break
-    return { spreadsheetId: "supabase-mode" };
+/** Legacy stub — kept for backwards compatibility so callers don't break. */
+export const initSheet = async () => {
+  return { spreadsheetId: "supabase-mode" };
+};
+
+export const syncRegistration = async (input: { session: z.infer<typeof sessionSchema> }) => {
+  const s = sessionSchema.parse(input.session);
+
+  const { error } = await supabase.from("registrations").insert({
+    id: s.id,
+    customer_name: s.customerName,
+    customer_mobile: s.customerMobile,
+    tables: s.tableIds.join(", "),
+    adults: s.adults,
+    kids: s.kids,
+    adult_rate: s.pricing.adultRate,
+    kid_rate: s.pricing.kidRate,
+    subsequent_rate: s.pricing.subsequentRate,
+    staff_name: s.staffName,
+    created_at: new Date().toISOString(),
   });
 
-export const syncRegistration = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({ session: sessionSchema }).parse(d))
-  .handler(async ({ data }) => {
-    const s = data.session;
-    
-    // Save to Supabase 'registrations' table instead of Google Sheets
-    const { error } = await supabase.from("registrations").insert({
-      id: s.id,
-      customer_name: s.customerName,
-      customer_mobile: s.customerMobile,
-      tables: s.tableIds.join(", "),
-      adults: s.adults,
-      kids: s.kids,
-      adult_rate: s.pricing.adultRate,
-      kid_rate: s.pricing.kidRate,
-      subsequent_rate: s.pricing.subsequentRate,
-      staff_name: s.staffName,
-      created_at: new Date().toISOString(),
-    });
+  if (error) console.error("Supabase registration sync failed:", error);
+  return { ok: !error };
+};
 
-    if (error) console.error("Supabase registration sync failed:", error);
-    
-    return { ok: !error };
+export const syncBill = async (input: {
+  bill: {
+    sessionId: string;
+    customerName: string;
+    customerMobile: string;
+    tables: string[];
+    startedAt: number;
+    endedAt: number;
+    durationMin: number;
+    subtotal: number;
+    total: number;
+  };
+  session: z.infer<typeof sessionSchema>;
+}) => {
+  const b = input.bill;
+
+  const { error } = await supabase.from("bills").insert({
+    session_id: b.sessionId,
+    customer_name: b.customerName,
+    customer_mobile: b.customerMobile,
+    tables: b.tables.join(", "),
+    started_at: new Date(b.startedAt).toISOString(),
+    ended_at: new Date(b.endedAt).toISOString(),
+    duration_min: b.durationMin,
+    subtotal: b.subtotal,
+    total: b.total,
+    created_at: new Date().toISOString(),
   });
 
-export const syncBill = createServerFn({ method: "POST" })
-  .inputValidator((d) => z.object({
-    bill: z.object({
-      sessionId: z.string(),
-      customerName: z.string(),
-      customerMobile: z.string(),
-      tables: z.array(z.string()),
-      startedAt: z.number(),
-      endedAt: z.number(),
-      durationMin: z.number(),
-      subtotal: z.number(),
-      total: z.number(),
-    }),
-    session: sessionSchema,
-  }).parse(d))
-  .handler(async ({ data }) => {
-    const b = data.bill;
-    
-    // Save to Supabase 'bills' table instead of Google Sheets
-    const { error } = await supabase.from("bills").insert({
-      session_id: b.sessionId,
-      customer_name: b.customerName,
-      customer_mobile: b.customerMobile,
-      tables: b.tables.join(", "),
-      started_at: new Date(b.startedAt).toISOString(),
-      ended_at: new Date(b.endedAt).toISOString(),
-      duration_min: b.durationMin,
-      subtotal: b.subtotal,
-      total: b.total,
-      created_at: new Date().toISOString(),
-    });
-
-    if (error) console.error("Supabase bill sync failed:", error);
-
-    return { ok: !error };
-  });
+  if (error) console.error("Supabase bill sync failed:", error);
+  return { ok: !error };
+};

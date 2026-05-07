@@ -11,12 +11,6 @@ import { computeBill, ensurePersons, formatDuration, summarisePersons } from "@/
 import { useTick } from "@/hooks/use-tick";
 
 export const Route = createFileRoute("/session/$id")({
-  head: () => ({
-    meta: [
-      { title: "Session — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Active session timer, person management, and billing." },
-    ],
-  }),
   component: () => (<RequireAuth><SessionPage /></RequireAuth>),
 });
 

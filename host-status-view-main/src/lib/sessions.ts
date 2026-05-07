@@ -81,7 +81,7 @@ export const sessionsApi = {
     const all = storage.getSessions();
     all.push(s);
     storage.setSessions(all);
-    syncRegistration({ data: { session: s } }).catch(() => {});
+    syncRegistration({ session: s }).catch(() => {});
     return s;
   },
 
@@ -214,7 +214,7 @@ export const sessionsApi = {
     s.persons = persons;
     storage.setSessions(all);
     const bill = computeBill(s, endedAt);
-    syncBill({ data: { bill, session: s } }).catch(() => {});
+    syncBill({ bill, session: s }).catch(() => {});
     return bill;
   },
 };

@@ -12,12 +12,6 @@ import { storage } from "@/lib/storage";
 import { formatDuration } from "@/lib/billing";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Dashboard — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Live table occupancy, timers, and session management." },
-    ],
-  }),
   component: () => (<RequireAuth><Dashboard /></RequireAuth>),
 });
 

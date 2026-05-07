@@ -8,12 +8,6 @@ import { sessionsApi } from "@/lib/sessions";
 import { computeBill, formatDurationMin, ensurePersons } from "@/lib/billing";
 
 export const Route = createFileRoute("/bill/$id")({
-  head: () => ({
-    meta: [
-      { title: "Bill — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Customer bill with QR verification." },
-    ],
-  }),
   component: () => (<RequireAuth><BillPage /></RequireAuth>),
 });
 
