@@ -7,6 +7,7 @@ const KEYS = {
   sessions: "ph_sessions",
   theme: "ph_theme",
   tables: "ph_tables",
+  hosts: "ph_hosts",
 };
 
 // ──────────────────────────────────────────────
@@ -99,5 +100,14 @@ export const storage = {
   setTables(list: string[]) {
     localStorage.setItem(KEYS.tables, JSON.stringify(list));
     window.dispatchEvent(new Event("ph_tables_changed"));
+  },
+  getHosts(): string[] {
+    if (typeof window === "undefined") return [];
+    const raw = localStorage.getItem(KEYS.hosts);
+    return raw ? JSON.parse(raw) : [];
+  },
+  setHosts(list: string[]) {
+    localStorage.setItem(KEYS.hosts, JSON.stringify(list));
+    window.dispatchEvent(new Event("ph_hosts_changed"));
   },
 };

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { UserCheck, UserX } from "lucide-react";
+import { UserCheck, UserX, Plus } from "lucide-react";
 import { sessionsApi } from "@/lib/sessions";
 import type { Session } from "@/lib/types";
+import { EMPLOYEES } from "@/lib/employees";
 
-// Keep in sync with the default roster used in /new.
-const DEFAULT_HOSTS = ["Sanjay", "Priya", "Rahul", "Sneha", "Vikram", "Neha"];
+// Derived from the central employees list — only staff with the Host role appear here.
+const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
+import { storage } from "@/lib/storage";
 
 interface HostInfo {
   name: string;
@@ -15,17 +17,27 @@ interface HostInfo {
 
 export function HostStatus() {
   const [active, setActive] = useState<Session[]>([]);
+  const [customHosts, setCustomHosts] = useState<string[]>(storage.getHosts());
   useEffect(() => {
     const refresh = () => setActive(sessionsApi.active());
     refresh();
+    const handleHostsChanged = () => setCustomHosts(storage.getHosts());
     window.addEventListener("ph_sessions_changed", refresh);
-    return () => window.removeEventListener("ph_sessions_changed", refresh);
+    window.addEventListener("ph_hosts_changed", handleHostsChanged);
+    return () => {
+      window.removeEventListener("ph_sessions_changed", refresh);
+      window.removeEventListener("ph_hosts_changed", handleHostsChanged);
+    };
   }, []);
+
+  const allHosts = useMemo(() => {
+    return Array.from(new Set([...DEFAULT_HOSTS, ...customHosts]));
+  }, [customHosts]);
 
   const hosts: HostInfo[] = useMemo(() => {
     const map = new Map<string, HostInfo>();
     // Seed roster with defaults so they always appear (as free if not assigned).
-    DEFAULT_HOSTS.forEach((n) =>
+    allHosts.forEach((n) =>
       map.set(n, { name: n, busy: false, tables: [], customers: [] }),
     );
     // Fold in any host currently attending an active session.
@@ -66,6 +78,20 @@ export function HostStatus() {
           <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-3 py-1 font-medium text-success">
             <UserX className="h-3.5 w-3.5" /> {freeCount} free
           </span>
+          <button
+            onClick={() => {
+              const name = window.prompt("Enter new host name:");
+              if (name?.trim()) {
+                const current = storage.getHosts();
+                if (!current.includes(name.trim())) {
+                  storage.setHosts([...current, name.trim()]);
+                }
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full bg-border/50 px-3 py-1 font-medium hover:bg-border transition"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Host
+          </button>
         </div>
       </div>
 

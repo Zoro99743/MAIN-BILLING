@@ -9,6 +9,7 @@ import { TABLE_CAPACITY, MENU_ITEMS, type PricingPlan, type TableId } from "@/li
 import { storage } from "@/lib/storage";
 import { sessionsApi } from "@/lib/sessions";
 import { formatDuration } from "@/lib/billing";
+import { EMPLOYEES } from "@/lib/employees";
 
 const searchSchema = z.object({ table: z.string().optional() });
 
@@ -23,8 +24,8 @@ export const Route = createFileRoute("/new")({
   component: () => (<RequireAuth><NewSession /></RequireAuth>),
 });
 
-// Default roster of cafe hosts (staff on shift). Can be extended on the fly.
-const DEFAULT_HOSTS = ["Praveenbalaji", "Vijayakumar", "Phebe"];
+// Host roster is derived from the central employees list — role "host" only.
+const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
 
 function NewSession() {
   const nav = useNavigate();

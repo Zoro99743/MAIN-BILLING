@@ -58,7 +58,7 @@ function LoginPage() {
       // Proceed anyway, DB sync is optional for logging in if it's in our valid list
     }
 
-    setStaff({ id: validEmployee.passwordId, name: validEmployee.username, role: validEmployee.role, mobile: "", loggedInAt: Date.now() });
+    setStaff({ name: validEmployee.username, mobile: "", loggedInAt: Date.now() });
     toast.success(`Welcome back, ${validEmployee.username}!`);
     nav({ to: "/" });
   };

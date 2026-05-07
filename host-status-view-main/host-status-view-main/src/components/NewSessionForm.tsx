@@ -1,12 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Users, Clock, User, Phone, TableProperties } from "lucide-react";
 import { sessionsApi } from "@/lib/sessions";
 import { storage } from "@/lib/storage";
 import { toast } from "sonner";
-import { EMPLOYEES } from "@/lib/employees";
 
-const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
+const DEFAULT_HOSTS = ["Praveenbalaji", "Vijayakumar", "Phebe"];
 
 export function NewSessionForm() {
   const navigate = useNavigate();
@@ -21,17 +20,6 @@ export function NewSessionForm() {
   const [selectedTable, setSelectedTable] = useState(search.table ?? tables[0] ?? "");
   const [selectedHosts, setSelectedHosts] = useState<string[]>([]);
   const [error, setError] = useState("");
-  const [customHosts, setCustomHosts] = useState<string[]>(storage.getHosts());
-
-  useEffect(() => {
-    const handleHostsChanged = () => setCustomHosts(storage.getHosts());
-    window.addEventListener("ph_hosts_changed", handleHostsChanged);
-    return () => window.removeEventListener("ph_hosts_changed", handleHostsChanged);
-  }, []);
-
-  const allHosts = useMemo(() => {
-    return Array.from(new Set([...DEFAULT_HOSTS, ...customHosts]));
-  }, [customHosts]);
 
   const toggleHost = (name: string) => {
     setSelectedHosts((prev) =>
@@ -200,7 +188,7 @@ export function NewSessionForm() {
             <User className="h-3.5 w-3.5" /> Assign Hosts
           </label>
           <div className="flex flex-wrap gap-2">
-            {allHosts.map((h) => (
+            {DEFAULT_HOSTS.map((h) => (
               <button
                 key={h}
                 onClick={() => toggleHost(h)}

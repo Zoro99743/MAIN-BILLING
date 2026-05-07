@@ -5,7 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { AppHeader } from "@/components/AppHeader";
 import { RequireAuth } from "@/components/AuthGuard";
 import { sessionsApi } from "@/lib/sessions";
-import { computeBill, formatDuration, ensurePersons } from "@/lib/billing";
+import { computeBill, formatDurationMin, ensurePersons } from "@/lib/billing";
 
 export const Route = createFileRoute("/bill/$id")({
   head: () => ({
@@ -134,9 +134,9 @@ function BillPage() {
             <dt>Mobile</dt><dd className="text-right">{bill.customerMobile}</dd>
             <dt>Table(s)</dt><dd className="text-right">{bill.tables.join(", ") || "—"}</dd>
             <dt>Persons</dt><dd className="text-right">{totalAdults} adult{totalAdults!==1?"s":""}{totalKids>0?` + ${totalKids} kid${totalKids!==1?"s":""}`:""}</dd>
-            <dt>In time</dt><dd className="text-right">{new Date(bill.startedAt).toLocaleString()}</dd>
-            <dt>Out time</dt><dd className="text-right">{new Date(bill.endedAt).toLocaleString()}</dd>
-            <dt>Duration</dt><dd className="text-right tabular-nums">{formatDuration(bill.endedAt - bill.startedAt)}</dd>
+            <dt>In time</dt><dd className="text-right">{new Date(bill.startedAt).toLocaleString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</dd>
+            <dt>Out time</dt><dd className="text-right">{new Date(bill.endedAt).toLocaleString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</dd>
+            <dt>Duration</dt><dd className="text-right tabular-nums">{formatDurationMin(bill.endedAt - bill.startedAt)}</dd>
           </dl>
 
           <div className="t-divider my-2 border-t border-dashed border-border" />
