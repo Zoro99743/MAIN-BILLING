@@ -117,8 +117,8 @@ export const sessionsApi = {
     storage.setSessions(all);
   },
 
-  // NEW — edit the session start time. Persons who joined at the old start are shifted.
-  setStartedAt(id: string, newStart: number) {
+  // NEW — edit the session start/end times. Persons are shifted/clamped.
+  updateSessionTimes(id: string, newStart: number, newEnd?: number) {
     const all = storage.getSessions();
     const s = all.find((x) => x.id === id);
     if (!s) return;
@@ -126,11 +126,16 @@ export const sessionsApi = {
     const persons = ensurePersons(s).slice();
     persons.forEach((p) => {
       if (p.joinedAt === oldStart) p.joinedAt = newStart;
-      if (p.joinedAt < newStart) p.joinedAt = newStart; // clamp into new window
+      if (p.joinedAt < newStart) p.joinedAt = newStart;
+      if (newEnd) {
+        if (p.leftAt && p.leftAt > newEnd) p.leftAt = newEnd;
+        if (p.joinedAt > newEnd) p.joinedAt = newEnd;
+      }
     });
     s.persons = persons;
     s.startedAt = newStart;
     s.history = s.history.map((h) => (h.at === oldStart ? { ...h, at: newStart } : h));
+    s.endedAt = newEnd;
     storage.setSessions(all);
   },
 

@@ -40,10 +40,10 @@ export function NewSessionForm() {
   };
 
   const handleSubmit = () => {
-    if (!customerName.trim() || !mobile.trim()) {
-      setError("Customer name and mobile are required.");
-      window.alert("Customer details are missing! Please enter both the customer's name and mobile number on the spot.");
-      toast.error("Customer details are required.");
+    if (!customerName.trim()) {
+      setError("Customer name is required.");
+      window.alert("Customer name is missing! Please enter the customer's name.");
+      toast.error("Customer name is required.");
       return;
     }
     if (!selectedTable) {
