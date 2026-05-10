@@ -1,5 +1,6 @@
 import { storage } from "./storage";
-import { type Person, type PricingPlan, type Session, type TableId } from "./types";
+import { MENU_ITEMS, type Person, type PricingPlan, type Session, type TableId } from "./types";
+import { supabase } from "./supabase";
 import { syncRegistration, syncBill } from "@/server/sheets.functions";
 import { computeBill, ensurePersons } from "./billing";
 
@@ -205,6 +206,46 @@ export const sessionsApi = {
     const taken = new Set<TableId>();
     storage.getSessions().filter((s) => s.status === "active").forEach((s) => s.tableIds.forEach((t) => taken.add(t)));
     return storage.getTables().filter((t) => !taken.has(t));
+  },
+  async sendNewOrdersToKitchen(id: string) {
+    const all = storage.getSessions();
+    const s = all.find((x) => x.id === id);
+    if (!s) return;
+
+    const current = s.menuOrders ?? {};
+    const sent = s.sentOrders ?? {};
+    
+    const newItems: Array<{ name: string; qty: number }> = [];
+    
+    Object.entries(current).forEach(([itemId, qty]) => {
+      const alreadySent = sent[itemId] ?? 0;
+      if (qty > alreadySent) {
+        const item = MENU_ITEMS.find(m => m.id === itemId);
+        newItems.push({
+          name: item?.label || itemId,
+          qty: qty - alreadySent
+        });
+      }
+    });
+
+    if (newItems.length === 0) return;
+
+    const { error } = await supabase.from("orders").insert({
+      session_id: s.id,
+      table_number: s.tableIds.join(", "),
+      customer_count: (s.persons?.filter(p => !p.leftAt).length) || (s.adults + s.kids),
+      items: newItems,
+      created_at: new Date().toISOString()
+    });
+
+    if (!error) {
+      s.sentOrders = { ...current };
+      storage.setSessions(all);
+      return true;
+    } else {
+      console.error("Kitchen sync error:", error);
+      throw error;
+    }
   },
   complete(id: string) {
     const all = storage.getSessions();

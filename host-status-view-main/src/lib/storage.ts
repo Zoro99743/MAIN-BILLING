@@ -21,15 +21,28 @@ if (typeof window !== "undefined") {
     .from("app_data")
     .select("*")
     .in("id", SYNC_KEYS)
-    .then(({ data }) => {
-      data?.forEach((row) => {
-        const key = row.id as (typeof SYNC_KEYS)[number];
-        if (row.data?.list) {
-          localStorage.setItem(`ph_${key}`, JSON.stringify(row.data.list));
-          window.dispatchEvent(new CustomEvent(`ph_${key}_changed`));
+    .then(
+      ({ data, error }) => {
+        if (error) {
+          console.error("Supabase initial fetch failed:", error.message);
+          return;
         }
-      });
-    });
+        data?.forEach((row) => {
+          const key = row.id as (typeof SYNC_KEYS)[number];
+          if (row.data?.list) {
+            // Only overwrite if remote data is newer or local is empty
+            const localRaw = localStorage.getItem(`ph_${key}`);
+            if (!localRaw) {
+              localStorage.setItem(`ph_${key}`, JSON.stringify(row.data.list));
+              window.dispatchEvent(new CustomEvent(`ph_${key}_changed`));
+            }
+          }
+        });
+      },
+      (err: any) => {
+        console.error("Unhandled error during Supabase sync:", err);
+      }
+    );
 
   // 2. Realtime subscription for all app data
   supabase

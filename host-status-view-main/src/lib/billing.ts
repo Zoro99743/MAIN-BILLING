@@ -82,7 +82,9 @@ export function chargeForPerson(p: Person, sessionEnd: number, subsequentRate: n
 
   // Amounts: based on whole minutes only
   const firstHourAmt = round((firstHourMs / MS_PER_HOUR) * p.firstHourRate);
-  const extraAmt = round((extraMs / MS_PER_HOUR) * subsequentRate);
+  // If first hour is free (Cafe Only), subsequent hours are also free.
+  const rateForExtra = p.firstHourRate === 0 ? 0 : subsequentRate;
+  const extraAmt = round((extraMs / MS_PER_HOUR) * rateForExtra);
 
   const presentMin = presentMs / MS_PER_MIN;
   const firstHourMin = firstHourMs / MS_PER_MIN;
@@ -124,7 +126,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
     lines.push({
       label: desc,
       qty,
-      rate: subsequent,
+      rate: c.extraMs > 0 ? subsequent : c.person.firstHourRate,
       amount: c.total,
     });
   }
@@ -144,7 +146,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   }
 
   const subtotal = round(lines.reduce((a, l) => a + l.amount, 0));
-  const totalMs = floorToMinutes(Math.max(0, sessionEnd - s.startedAt));
+  const totalMs = Math.max(0, floorToMinutes(sessionEnd) - floorToMinutes(s.startedAt));
 
   return {
     sessionId: s.id,
@@ -171,7 +173,11 @@ export function formatDuration(ms: number) {
 
 /** Bill display — only shows HH:MM */
 export function formatDurationMin(ms: number) {
-  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  // This ms might be a raw difference, but for display consistency 
+  // we usually want it to match the bill calculation.
+  // However, this function is called with (endedAt - startedAt).
+  // If we want it to match the clock:
+  const totalMin = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;

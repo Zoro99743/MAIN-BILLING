@@ -47,7 +47,8 @@ function SessionPage() {
     );
   }
 
-  const now = Date.now();
+  const realNow = Date.now();
+  const now = session.endedAt ?? realNow;
   const elapsed = now - session.startedAt;
   const planned = session.plannedDurationMin * 60_000;
   const remaining = planned - elapsed;
@@ -67,13 +68,19 @@ function SessionPage() {
         subtotal: l.amount
       }));
       // Mark as completed in the Kitchen/Billing orders table and attach the computed bill
-      await supabase.from("orders").update({ 
+      const { error } = await supabase.from("orders").update({ 
         status: "completed",
         bill_items: formattedItems,
         bill_total: bill.total,
         bill_final: bill.total,
         bill_discount: 0
       }).eq("session_id", session.id);
+
+      if (error) {
+        console.error("Failed to sync completed session to Supabase:", error);
+        toast.error("Cloud sync failed, but session completed locally.");
+      }
+      
       nav({ to: "/bill/$id", params: { id: session.id } });
     }
   };
@@ -107,23 +114,7 @@ function SessionPage() {
           <ArrowLeft className="h-4 w-4" /> Back to dashboard
         </button>
 
-        {activePersons.length > session.tableIds.length * 4 && (
-          <div className="mb-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 p-4 text-amber-600 dark:text-amber-400">
-            <div className="flex items-center gap-2 font-semibold">
-              <span className="text-xl">⚠️</span> Overcrowded Table(s)
-            </div>
-            <p className="mt-1 text-sm">
-              You have {activePersons.length} active persons but only {session.tableIds.length} table(s) allocated (capacity 4/table). 
-              Please allocate an additional table.
-            </p>
-            <button 
-              onClick={() => setAddTable(true)}
-              className="mt-3 rounded-full bg-amber-500 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
-            >
-              Add Table Now
-            </button>
-          </div>
-        )}
+
 
         <div className="glass-strong mb-6 grid gap-4 rounded-3xl p-6 sm:grid-cols-3">
           <div>
@@ -157,12 +148,6 @@ function SessionPage() {
             <div className="mt-2 flex justify-center gap-2">
               <button onClick={() => setEditTimer(true)} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 py-1 text-xs font-semibold transition hover:bg-muted">
                 <Pencil className="h-3.5 w-3.5" /> Edit timer
-              </button>
-              <button
-                onClick={() => { sessionsApi.extendSession(session.id, 60); toast.success("Extended +1 hour"); }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary transition hover:bg-primary hover:text-primary-foreground"
-              >
-                <Plus className="h-3.5 w-3.5" /> +1 hour
               </button>
             </div>
           </div>
@@ -273,7 +258,7 @@ function SessionPage() {
           <EditTimerModal
             startedAt={session.startedAt}
             endedAt={session.endedAt}
-            now={now}
+            now={realNow}
             onCancel={() => setEditTimer(false)}
             onSave={(newStart, newEnd) => {
               if (newStart > Date.now()) return toast.error("Start time can't be in the future");
@@ -304,7 +289,7 @@ function EditTimerModal({ startedAt, endedAt, now, onCancel, onSave }: { started
   };
 
   const [startVal, setStartVal] = useState(toLocalInput(startedAt));
-  const [endVal, setEndVal] = useState(endedAt ? toLocalInput(endedAt) : "");
+  const [endVal, setEndVal] = useState(toLocalInput(endedAt ?? now));
   const [useEndTime, setUseEndTime] = useState(!!endedAt);
 
   const startMs = useMemo(() => new Date(startVal).getTime(), [startVal]);
@@ -334,10 +319,7 @@ function EditTimerModal({ startedAt, endedAt, now, onCancel, onSave }: { started
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-medium text-muted-foreground">{useEndTime ? "Enabled" : "Live"}</span>
                 <button 
-                  onClick={() => {
-                    if (!useEndTime && !endVal) setEndVal(toLocalInput(Date.now()));
-                    setUseEndTime(!useEndTime);
-                  }}
+                  onClick={() => setUseEndTime(!useEndTime)}
                   className={`h-4 w-8 rounded-full p-0.5 transition-colors ${useEndTime ? "bg-primary" : "bg-muted"}`}
                 >
                   <div className={`h-3 w-3 rounded-full bg-white transition-transform ${useEndTime ? "translate-x-4" : "translate-x-0"}`} />
@@ -347,10 +329,12 @@ function EditTimerModal({ startedAt, endedAt, now, onCancel, onSave }: { started
             <input
               type="datetime-local"
               step="1"
-              disabled={!useEndTime}
               value={endVal}
-              onChange={(e) => setEndVal(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
+              onChange={(e) => {
+                setEndVal(e.target.value);
+                setUseEndTime(true);
+              }}
+              className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
             />
           </div>
         </div>
@@ -379,8 +363,19 @@ function MenuOrders({ session }: { session: Session }) {
   const totalQty = Object.values(orders).reduce((a, b) => a + b, 0);
   const totalAmt = MENU_ITEMS.reduce((sum, m) => sum + (orders[m.id] ?? 0) * m.price, 0);
   const setQty = (itemId: string, qty: number) => {
+    const isAdding = qty > (orders[itemId] ?? 0);
     sessionsApi.updateMenuQty(session.id, itemId, Math.max(0, qty));
     window.dispatchEvent(new Event("ph_sessions_changed"));
+
+    if (isAdding) {
+      // Auto-sync after 3s to batch multiple clicks
+      clearTimeout((window as any)._menuSyncTimer);
+      (window as any)._menuSyncTimer = setTimeout(() => {
+        sessionsApi.sendNewOrdersToKitchen(session.id).then((synced) => {
+          if (synced) toast.success("New items sent to kitchen!");
+        }).catch(console.error);
+      }, 3000);
+    }
   };
 
   return (
@@ -392,22 +387,12 @@ function MenuOrders({ session }: { session: Session }) {
           <span className="text-xs text-muted-foreground">{totalQty} item{totalQty === 1 ? "" : "s"} · ₹{totalAmt.toFixed(2)}</span>
           <button 
             onClick={() => {
-              const itemsArr = Object.entries(orders).filter(([_, q]) => q > 0).map(([id, q]) => ({
-                name: MENU_ITEMS.find(x => x.id === id)?.label || id,
-                qty: q
-              }));
-              if (itemsArr.length === 0) return toast.error("No items to send");
-              
-              supabase.from("orders").insert({
-                session_id: session.id,
-                table_number: session.tableIds.join(", "),
-                customer_count: session.adults + session.kids,
-                items: itemsArr,
-                created_by: "system"
-              }).then(({ error }) => {
-                if (error) toast.error("Failed to send: " + error.message);
-                else toast.success("Sent to Kitchen!");
-              });
+              sessionsApi.sendNewOrdersToKitchen(session.id)
+                .then((synced) => {
+                  if (synced) toast.success("Sent to Kitchen!");
+                  else toast.info("No new items to send.");
+                })
+                .catch(err => toast.error("Failed to send: " + err.message));
             }}
             className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary hover:text-primary-foreground"
           >

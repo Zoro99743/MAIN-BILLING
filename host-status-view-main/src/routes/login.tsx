@@ -4,7 +4,6 @@ import { User, KeyRound, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStaff } from "@/components/AuthGuard";
-import { supabase } from "@/lib/supabase";
 import { EMPLOYEES } from "@/lib/employees";
 
 export const Route = createFileRoute("/login")({
@@ -19,7 +18,11 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { if (staff) nav({ to: "/" }); }, [staff, nav]);
+  useEffect(() => { 
+    if (staff && staff.role === "admin") {
+      nav({ to: "/" }); 
+    }
+  }, [staff, nav]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,17 +42,9 @@ function LoginPage() {
       return toast.error("Invalid username or password");
     }
 
-    // Save/sync this valid employee to the Supabase database
-    try {
-      await supabase.from("staff").upsert({
-        id: validEmployee.passwordId, // using their ID as primary key
-        name: validEmployee.username,
-        role: validEmployee.role,
-        pin: validEmployee.passwordId, // store password in pin
-      }, { onConflict: "id" });
-    } catch (err) {
-      console.error("Failed to sync to db:", err);
-      // Proceed anyway, DB sync is optional for logging in if it's in our valid list
+    if (validEmployee.role !== "admin") {
+      setLoading(false);
+      return toast.error("Access denied. Only admins can access the billing portal.");
     }
 
     setStaff({ id: validEmployee.passwordId, name: validEmployee.username, role: validEmployee.role, mobile: "", loggedInAt: Date.now() });

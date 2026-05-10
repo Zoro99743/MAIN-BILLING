@@ -67,14 +67,22 @@ function NewSession() {
   }, []);
 
   // Hosts already attending an active session — useful for UI status but no longer a restriction.
-  const busyHosts = useMemo(() => {
-    const set = new Set<string>();
+  const hostCustomerMap = useMemo(() => {
+    const map = new Map<string, number>();
     sessionsApi.active().forEach((s) => {
-      const names = (s.hosts && s.hosts.length > 0 ? s.hosts : [s.staffName]).filter(Boolean);
-      names.forEach((n) => set.add(n.trim()));
+      const activePpl = s.persons ? s.persons.filter((p) => !p.leftAt).length : s.adults + s.kids;
+      const hostNames = (s.hosts && s.hosts.length > 0 ? s.hosts : [s.staffName]).filter(Boolean);
+      hostNames.forEach((n) => {
+        const name = n.trim();
+        map.set(name, (map.get(name) || 0) + activePpl);
+      });
     });
-    return set;
+    return map;
   }, []);
+
+  const totalAttendingCustomers = useMemo(() => {
+    return Array.from(hostCustomerMap.values()).reduce((a, b) => a + b, 0);
+  }, [hostCustomerMap]);
 
   const totalPersons = adults + kids;
 
@@ -91,13 +99,14 @@ function NewSession() {
     return hinted.slice(0, need);
   }, [totalPersons, occupied, search.table, allTables]);
 
-  const [tables, setTables] = useState<TableId[]>(autoTables);
-  const [autoMode, setAutoMode] = useState(true);
+  const [tables, setTables] = useState<TableId[]>(() => {
+    const free = allTables.filter((t) => !occupied.has(t));
+    if (search.table && free.includes(search.table as TableId)) return [search.table as TableId];
+    return [];
+  });
+  const [autoMode, setAutoMode] = useState(false);
 
-  // Keep tables in sync with auto-suggestion until the user manually overrides.
-  useEffect(() => {
-    if (autoMode) setTables(autoTables);
-  }, [autoMode, autoTables]);
+
 
   // Keep memberRates length in sync with adults + kids (preserve existing rates,
   // pad new entries with the most-recent rate or default 149)
@@ -119,11 +128,6 @@ function NewSession() {
     setAutoMode(false);
     setTables((prev) => {
       if (prev.includes(t)) return prev.filter((x) => x !== t);
-      const need = Math.max(1, Math.ceil(totalPersons / TABLE_CAPACITY));
-      if (prev.length >= need) {
-        if (need === 1) return [t];
-        return [...prev.slice(prev.length - need + 1), t];
-      }
       return [...prev, t];
     });
   };
@@ -156,14 +160,13 @@ function NewSession() {
     if (mobile.trim() && !/^\d{10}$/.test(mobile)) return toast.error("Valid 10-digit mobile required");
     if (totalPersons < 1) return toast.error("At least 1 person required");
     if (tables.length === 0) return toast.error("No free tables available");
-    if (totalPersons > capacity) return toast.error(`Selected tables fit ${capacity} people max`);
     if (hosts.length === 0) return toast.error("Pick at least one host");
     if (memberRates.some((r) => r === undefined || r === null || r < 0 || isNaN(r))) return toast.error("Every member needs a valid rate");
 
     const isCafeOnly = memberRates.every((r) => r === 0);
     const adultRatesAvg = memberRates.length ? Math.round(ratesTotal / memberRates.length) : 149;
     const pricing: PricingPlan = {
-      adultRate: adultRatesAvg, // legacy fallback
+      adultRate: adultRatesAvg,
       kidRate: isCafeOnly ? 0 : 99,
       subsequentRate: isCafeOnly ? 0 : 99,
       custom: memberRates.some((r) => r !== 149 && r !== 199 && r !== 99 && r !== 0),
@@ -255,23 +258,29 @@ function NewSession() {
               <Counter label="Adults" value={adults} onChange={(n) => { setAdults(n); setAutoMode(true); }} min={0} />
               <Counter label="Kids" value={kids} onChange={(n) => { setKids(n); setAutoMode(true); }} min={0} />
             </div>
-            <div className="text-xs text-muted-foreground">Total: <span className="font-semibold text-foreground">{totalPersons} persons</span></div>
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">
+                Total: <span className="font-semibold text-foreground">{totalPersons} persons</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAdults(2); setKids(0); setAutoMode(true); }}
+                className="rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-destructive hover:text-destructive"
+              >
+                Reset
+              </button>
+            </div>
           </section>
 
           <section className="glass space-y-4 rounded-2xl p-5">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold">Tables</h2>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{tables.length} selected · fits {capacity}</span>
-                {!autoMode && (
-                  <button type="button" onClick={() => setAutoMode(true)} className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium hover:bg-muted/70">Auto</button>
-                )}
+                <span className="text-xs text-muted-foreground">{tables.length} selected</span>
               </div>
             </div>
             <div className="text-[11px] text-muted-foreground">
-              {autoMode
-                ? `Auto-selected based on ${totalPersons} ${totalPersons === 1 ? "person" : "people"} (4 / table). Tap to override.`
-                : "Manual selection — tap Auto to reset."}
+              Select tables for this session. Tap a table to select/deselect.
             </div>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-9 lg:grid-cols-3 xl:grid-cols-9">
               {allTables.map((t) => {
@@ -300,12 +309,11 @@ function NewSession() {
           <section className="glass space-y-4 rounded-2xl p-5 lg:col-span-2">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold">Hosts</h2>
-              <span className="text-xs text-muted-foreground">{hosts.length} attending</span>
+              <span className="text-xs text-muted-foreground">{totalAttendingCustomers} attending</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {hostRoster.map((h) => {
                 const on = hosts.includes(h);
-                const busy = busyHosts.has(h);
                 return (
                   <button
                     type="button"
@@ -317,7 +325,11 @@ function NewSession() {
                     style={on ? { background: "var(--gradient-primary)" } : undefined}
                   >
                     {h}
-                    {busy && <span className="ml-1 text-[10px] opacity-70 uppercase">(busy)</span>}
+                    {hostCustomerMap.has(h) && (
+                      <span className="ml-1 text-[10px] opacity-70 uppercase">
+                        ({hostCustomerMap.get(h)} attending)
+                      </span>
+                    )}
                     {on && <X className="ml-1 inline h-3 w-3" />}
                   </button>
                 );
@@ -414,17 +426,22 @@ function NewSession() {
                       <span className="font-semibold">{label}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      {[149, 199, 99, 0].map((p) => (
+                      {[
+                        { v: 149, l: "149" },
+                        { v: 199, l: "199" },
+                        { v: 99, l: "99" },
+                        { v: 0, l: "Cafe" },
+                      ].map(({ v, l }) => (
                         <button
-                          key={p}
+                          key={v}
                           type="button"
-                          onClick={() => setMemberRates((prev) => prev.map((r, idx) => (idx === i ? p : r)))}
-                          className={`rounded-md px-2 py-1 text-xs font-bold transition ${
-                            rate === p ? "text-primary-foreground shadow" : "bg-muted/50 hover:bg-muted"
+                          onClick={() => setMemberRates((prev) => prev.map((r, idx) => (idx === i ? v : r)))}
+                          className={`rounded-md px-2 py-1 text-[11px] font-bold transition ${
+                            rate === v ? "text-primary-foreground shadow" : "bg-muted/50 hover:bg-muted"
                           }`}
-                          style={rate === p ? { background: "var(--gradient-primary)" } : undefined}
+                          style={rate === v ? { background: "var(--gradient-primary)" } : undefined}
                         >
-                          {p === 0 ? "Cafe" : `₹${p}`}
+                          {l === "Cafe" ? "Cafe" : `₹${l}`}
                         </button>
                       ))}
                       <span className="ml-1 text-xs text-muted-foreground">or</span>
@@ -537,14 +554,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Counter({ label, value, onChange, min = 0 }: { label: string; value: number; onChange: (n: number) => void; min?: number }) {
+function Counter({ label, value, onChange, min = 0, max }: { label: string; value: number; onChange: (n: number) => void; min?: number; max?: number }) {
+  const atMax = max !== undefined && value >= max;
   return (
     <div>
       <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
       <div className="glass flex items-center justify-between rounded-xl px-2 py-1.5">
         <button type="button" onClick={() => onChange(Math.max(min, value - 1))} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Minus className="h-4 w-4" /></button>
         <span className="font-display text-xl font-bold tabular-nums">{value}</span>
-        <button type="button" onClick={() => onChange(value + 1)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Plus className="h-4 w-4" /></button>
+        <button
+          type="button"
+          onClick={() => { if (!atMax) onChange(value + 1); }}
+          disabled={atMax}
+          className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );

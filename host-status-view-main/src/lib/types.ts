@@ -1,6 +1,6 @@
 export type TableId = string;
 export const DEFAULT_TABLE_IDS: TableId[] = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
-export const TABLE_CAPACITY = 4;
+export const TABLE_CAPACITY = 100;
 
 export interface Staff {
   id: string;
@@ -112,6 +112,7 @@ export interface Session {
   history: Array<{ at: number; adults: number; kids: number }>; // legacy
   persons?: Person[];    // NEW source of truth
   menuOrders?: Record<string, number>;
+  sentOrders?: Record<string, number>;
 }
 
 export const MENU_ITEMS: { id: string; label: string; price: number }[] = [

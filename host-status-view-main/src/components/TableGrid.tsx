@@ -33,9 +33,10 @@ export function TableGrid({ tick }: Props) {
       {tables.map((id) => {
         const s = tableMap.get(id);
         const occupied = !!s;
-        const elapsed = s ? Date.now() - s.startedAt : 0;
+        const now = s ? (s.endedAt ?? Date.now()) : Date.now();
+        const elapsed = s ? now - s.startedAt : 0;
         const planned = s ? s.plannedDurationMin * 60_000 : 0;
-        const remaining = s ? Math.max(0, planned - elapsed) : 0;
+        const remaining = s ? planned - elapsed : 0;
         const card = (
           <div className={`glass relative overflow-hidden rounded-2xl p-4 transition group-hover:scale-[1.02] ${occupied ? "ring-1 ring-destructive/40" : "ring-1 ring-success/40"}`}>
             <div className="absolute right-3 top-3 flex items-center gap-1.5">
@@ -53,7 +54,7 @@ export function TableGrid({ tick }: Props) {
                     <Users className="h-3 w-3" /> {s!.adults + s!.kids} ppl
                   </div>
                   <div className="flex items-center gap-1 text-[11px] tabular-nums text-foreground">
-                    <Clock className="h-3 w-3" /> {formatDuration(remaining)}
+                    <Clock className="h-3 w-3" /> {formatDuration(elapsed)}
                   </div>
                 </>
               ) : (
