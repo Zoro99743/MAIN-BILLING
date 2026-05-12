@@ -3,9 +3,70 @@ export const DEFAULT_TABLE_IDS: TableId[] = ["A", "B", "C", "D", "E", "F", "G", 
 export const TABLE_CAPACITY = 4;
 
 export interface Staff {
+  id: string;
   name: string;
+  role: string;
   mobile: string;
   loggedInAt: number;
+}
+
+export interface Game {
+  id: string;
+  name: string;
+  category: string;
+  max_players: number;
+  status: 'available' | 'in-use';
+  created_at: string;
+}
+
+export interface AttendanceBreak {
+  type: string;
+  start: string;
+  end?: string;
+  duration?: number;
+}
+
+export interface Attendance {
+  id: string;
+  staff_id: string;
+  date: string;
+  clock_in: string;
+  clock_out?: string;
+  late_mins: number;
+  breaks: AttendanceBreak[];
+  force_stops: AttendanceBreak[];
+  created_at: string;
+}
+
+export interface StockLog {
+  id: string;
+  cook_id: string;
+  date: string;
+  items: Array<{ item_name: string; quantity: number; unit: string }>;
+  created_at: string;
+}
+
+export interface DamageReport {
+  id: string;
+  cook_id: string;
+  photo_url?: string;
+  description: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  admin_note?: string;
+  created_at: string;
+}
+
+export interface Task {
+  id: string;
+  assigned_to: string;
+  title: string;
+  description: string;
+  deadline: string;
+  priority: 'Low' | 'Medium' | 'High';
+  status: 'To Do' | 'In Progress' | 'Done';
+  delivery_url?: string;
+  rating?: number;
+  created_at: string;
 }
 
 export type AdultRate = 149 | 199 | number;

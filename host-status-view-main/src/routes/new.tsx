@@ -5,11 +5,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { AppHeader } from "@/components/AppHeader";
 import { RequireAuth, useStaff } from "@/components/AuthGuard";
-import { TABLE_CAPACITY, MENU_ITEMS, type PricingPlan, type TableId } from "@/lib/types";
+import { TABLE_CAPACITY, MENU_ITEMS, PACKAGES, type PricingPlan, type TableId, type PackageId } from "@/lib/types";
 import { storage } from "@/lib/storage";
 import { sessionsApi } from "@/lib/sessions";
 import { formatDuration } from "@/lib/billing";
-import { EMPLOYEES } from "@/lib/employees";
 
 const searchSchema = z.object({ table: z.string().optional() });
 
@@ -18,8 +17,10 @@ export const Route = createFileRoute("/new")({
   component: () => (<RequireAuth><NewSession /></RequireAuth>),
 });
 
-// Host roster is derived from the central employees list — role "host" only.
-const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
+import { EMPLOYEES } from "@/lib/employees";
+
+// Default roster of cafe hosts (staff on floor).
+const DEFAULT_HOSTS = EMPLOYEES.filter(e => e.role.toLowerCase() === "host").map(e => e.username);
 
 function NewSession() {
   const nav = useNavigate();
@@ -33,7 +34,8 @@ function NewSession() {
     return () => window.removeEventListener("ph_tables_changed", h);
   }, []);
 
-  const [startedAt] = useState<number>(() => Date.now());
+  const [startedAt, setStartedAt] = useState<number>(() => Date.now());
+  const [isManualStart, setIsManualStart] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     const i = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
@@ -44,18 +46,24 @@ function NewSession() {
   const [mobile, setMobile] = useState("");
   const [adults, setAdults] = useState(2);
   const [kids, setKids] = useState(0);
-  // Per-member hourly rate for FIRST hour. Length always = adults + kids.
-  const [memberRates, setMemberRates] = useState<number[]>(() => Array(2).fill(149));
+  // Per-member selection (PackageId or custom number). Length always = adults + kids.
+  const [memberSelections, setMemberSelections] = useState<Array<PackageId | number>>(() => Array(2).fill("games-food-149"));
   // Preset that gets applied to all members via the "Apply to all" button
-  const [bulkPreset, setBulkPreset] = useState<"149" | "199" | "99" | "0" | "custom">("149");
+  const [bulkPreset, setBulkPreset] = useState<PackageId | "custom">("games-food-149");
   const [bulkCustom, setBulkCustom] = useState<number>(149);
   const [selectAllMenu, setSelectAllMenu] = useState(false);
   const [menuQty, setMenuQty] = useState<Record<string, number>>({});
 
-  // Hosts
+  const getRate = (sel: PackageId | number) => {
+    if (typeof sel === "number") return sel;
+    return PACKAGES.find((p) => p.id === sel)?.adultRate ?? 149;
+  };
+
   const [hostRoster, setHostRoster] = useState<string[]>(() => {
     const me = staff?.name?.trim();
-    return me && !DEFAULT_HOSTS.includes(me) ? [me, ...DEFAULT_HOSTS] : DEFAULT_HOSTS;
+    // In "new session", we show all hosts. If the logged-in user is an admin (not in host list), we can add them to the selection options if they are currently hosting.
+    const isHost = DEFAULT_HOSTS.includes(me || "");
+    return me && !isHost ? [me, ...DEFAULT_HOSTS] : DEFAULT_HOSTS;
   });
   const [hosts, setHosts] = useState<string[]>(() => (staff?.name ? [staff.name] : []));
   const [newHost, setNewHost] = useState("");
@@ -67,14 +75,22 @@ function NewSession() {
   }, []);
 
   // Hosts already attending an active session — useful for UI status but no longer a restriction.
-  const busyHosts = useMemo(() => {
-    const set = new Set<string>();
+  const hostCustomerMap = useMemo(() => {
+    const map = new Map<string, number>();
     sessionsApi.active().forEach((s) => {
-      const names = (s.hosts && s.hosts.length > 0 ? s.hosts : [s.staffName]).filter(Boolean);
-      names.forEach((n) => set.add(n.trim()));
+      const activePpl = s.persons ? s.persons.filter((p) => !p.leftAt).length : s.adults + s.kids;
+      const hostNames = (s.hosts && s.hosts.length > 0 ? s.hosts : [s.staffName]).filter(Boolean);
+      hostNames.forEach((n) => {
+        const name = n.trim();
+        map.set(name, (map.get(name) || 0) + activePpl);
+      });
     });
-    return set;
+    return map;
   }, []);
+
+  const totalAttendingCustomers = useMemo(() => {
+    return Array.from(hostCustomerMap.values()).reduce((a, b) => a + b, 0);
+  }, [hostCustomerMap]);
 
   const totalPersons = adults + kids;
 
@@ -91,25 +107,27 @@ function NewSession() {
     return hinted.slice(0, need);
   }, [totalPersons, occupied, search.table, allTables]);
 
-  const [tables, setTables] = useState<TableId[]>(autoTables);
-  const [autoMode, setAutoMode] = useState(true);
+  const [tables, setTables] = useState<TableId[]>(() => {
+    const free = allTables.filter((t) => !occupied.has(t));
+    if (search.table && free.includes(search.table as TableId)) return [search.table as TableId];
+    return [];
+  });
+  const [autoMode, setAutoMode] = useState(false);
 
-  // Keep tables in sync with auto-suggestion until the user manually overrides.
-  useEffect(() => {
-    if (autoMode) setTables(autoTables);
-  }, [autoMode, autoTables]);
 
-  // Keep memberRates length in sync with adults + kids (preserve existing rates,
-  // pad new entries with the most-recent rate or default 149)
+
+  // Keep memberSelections length in sync with adults + kids
   useEffect(() => {
     const need = Math.max(0, totalPersons);
-    setMemberRates((prev) => {
+    setMemberSelections((prev) => {
       if (prev.length === need) return prev;
       if (prev.length > need) return prev.slice(0, need);
-      const fill = prev[prev.length - 1] ?? 149;
+      const fill = prev[prev.length - 1] ?? "games-food-149";
       return [...prev, ...Array(need - prev.length).fill(fill)];
     });
   }, [totalPersons]);
+
+  const memberRates = memberSelections.map(getRate);
 
   const capacity = tables.length * TABLE_CAPACITY;
   const ratesTotal = memberRates.reduce((a, b) => a + b, 0);
@@ -119,11 +137,6 @@ function NewSession() {
     setAutoMode(false);
     setTables((prev) => {
       if (prev.includes(t)) return prev.filter((x) => x !== t);
-      const need = Math.max(1, Math.ceil(totalPersons / TABLE_CAPACITY));
-      if (prev.length >= need) {
-        if (need === 1) return [t];
-        return [...prev.slice(prev.length - need + 1), t];
-      }
       return [...prev, t];
     });
   };
@@ -156,17 +169,16 @@ function NewSession() {
     if (mobile.trim() && !/^\d{10}$/.test(mobile)) return toast.error("Valid 10-digit mobile required");
     if (totalPersons < 1) return toast.error("At least 1 person required");
     if (tables.length === 0) return toast.error("No free tables available");
-    if (totalPersons > capacity) return toast.error(`Selected tables fit ${capacity} people max`);
     if (hosts.length === 0) return toast.error("Pick at least one host");
     if (memberRates.some((r) => r === undefined || r === null || r < 0 || isNaN(r))) return toast.error("Every member needs a valid rate");
 
     const isCafeOnly = memberRates.every((r) => r === 0);
     const adultRatesAvg = memberRates.length ? Math.round(ratesTotal / memberRates.length) : 149;
     const pricing: PricingPlan = {
-      adultRate: adultRatesAvg, // legacy fallback
+      adultRate: adultRatesAvg,
       kidRate: isCafeOnly ? 0 : 99,
       subsequentRate: isCafeOnly ? 0 : 99,
-      custom: memberRates.some((r) => r !== 149 && r !== 199 && r !== 99 && r !== 0),
+      custom: memberSelections.some((s) => typeof s === "number"),
       selectAllMenu,
       menuItems: selectAllMenu ? MENU_ITEMS.map((m) => m.id) : Object.keys(menuQty),
       memberRates: [...memberRates],
@@ -225,22 +237,43 @@ function NewSession() {
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
 
-        <div className="glass-strong sticky top-20 z-10 mb-6 flex items-center justify-between rounded-2xl px-5 py-3">
+        <div className="glass-strong sticky top-20 z-10 mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl px-5 py-3">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Session timer</div>
             <div className="font-display text-2xl font-bold tabular-nums">{formatDuration(elapsed)}</div>
           </div>
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Started</div>
-            <div className="text-sm font-medium">{new Date(startedAt).toLocaleTimeString()}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Started</div>
+              {isManualStart ? (
+                <input
+                  type="datetime-local"
+                  step="1"
+                  value={new Date(startedAt - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 19)}
+                  onChange={(e) => setStartedAt(new Date(e.target.value).getTime())}
+                  className="bg-transparent text-sm font-medium outline-none"
+                />
+              ) : (
+                <div className="text-sm font-medium">{new Date(startedAt).toLocaleTimeString()}</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsManualStart(!isManualStart)}
+              className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase transition ${isManualStart ? "bg-primary text-primary-foreground" : "glass text-muted-foreground"}`}
+            >
+              {isManualStart ? "Manual" : "Auto"}
+            </button>
           </div>
         </div>
 
         <form onSubmit={submit} className="grid gap-6 lg:grid-cols-2">
           <section className="glass space-y-4 rounded-2xl p-5">
             <h2 className="font-display text-lg font-semibold">Customer Details</h2>
-            <Field label="Name">
+            <Field label="Name" id="customer-name">
               <input
+                id="customer-name"
+                name="customer-name"
                 value={name}
                 onChange={(e) => setName(e.target.value.toUpperCase())}
                 placeholder="CUSTOMER NAME"
@@ -248,30 +281,44 @@ function NewSession() {
                 style={{ textTransform: "uppercase" }}
               />
             </Field>
-            <Field label="Mobile">
-              <input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="10-digit mobile" className="w-full bg-transparent outline-none" />
+            <Field label="Mobile" id="customer-mobile">
+              <input
+                id="customer-mobile"
+                name="customer-mobile"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                inputMode="numeric"
+                placeholder="10-digit mobile"
+                className="w-full bg-transparent outline-none"
+              />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Counter label="Adults" value={adults} onChange={(n) => { setAdults(n); setAutoMode(true); }} min={0} />
               <Counter label="Kids" value={kids} onChange={(n) => { setKids(n); setAutoMode(true); }} min={0} />
             </div>
-            <div className="text-xs text-muted-foreground">Total: <span className="font-semibold text-foreground">{totalPersons} persons</span></div>
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">
+                Total: <span className="font-semibold text-foreground">{totalPersons} persons</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAdults(2); setKids(0); setAutoMode(true); }}
+                className="rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-destructive hover:text-destructive"
+              >
+                Reset
+              </button>
+            </div>
           </section>
 
           <section className="glass space-y-4 rounded-2xl p-5">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold">Tables</h2>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{tables.length} selected · fits {capacity}</span>
-                {!autoMode && (
-                  <button type="button" onClick={() => setAutoMode(true)} className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium hover:bg-muted/70">Auto</button>
-                )}
+                <span className="text-xs text-muted-foreground">{tables.length} selected</span>
               </div>
             </div>
             <div className="text-[11px] text-muted-foreground">
-              {autoMode
-                ? `Auto-selected based on ${totalPersons} ${totalPersons === 1 ? "person" : "people"} (4 / table). Tap to override.`
-                : "Manual selection — tap Auto to reset."}
+              Select tables for this session. Tap a table to select/deselect.
             </div>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-9 lg:grid-cols-3 xl:grid-cols-9">
               {allTables.map((t) => {
@@ -300,12 +347,11 @@ function NewSession() {
           <section className="glass space-y-4 rounded-2xl p-5 lg:col-span-2">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold">Hosts</h2>
-              <span className="text-xs text-muted-foreground">{hosts.length} attending</span>
+              <span className="text-xs text-muted-foreground">{totalAttendingCustomers} attending</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {hostRoster.map((h) => {
                 const on = hosts.includes(h);
-                const busy = busyHosts.has(h);
                 return (
                   <button
                     type="button"
@@ -317,7 +363,11 @@ function NewSession() {
                     style={on ? { background: "var(--gradient-primary)" } : undefined}
                   >
                     {h}
-                    {busy && <span className="ml-1 text-[10px] opacity-70 uppercase">(busy)</span>}
+                    {hostCustomerMap.has(h) && (
+                      <span className="ml-1 text-[10px] opacity-70 uppercase">
+                        ({hostCustomerMap.get(h)} attending)
+                      </span>
+                    )}
                     {on && <X className="ml-1 inline h-3 w-3" />}
                   </button>
                 );
@@ -325,6 +375,8 @@ function NewSession() {
             </div>
             <div className="flex items-center gap-2">
               <input
+                id="new-host-name"
+                name="new-host-name"
                 value={newHost}
                 onChange={(e) => setNewHost(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHost(); } }}
@@ -352,23 +404,23 @@ function NewSession() {
                 Apply to all members
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {(["149", "199", "99", "0"] as const).map((p) => {
-                  const label = p === "0" ? "Cafe Only" : p === "99" ? "Gaming ₹99/hr" : `₹${p}/hr`;
-                  return (
-                  <label key={p} className={`glass flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                    bulkPreset === p ? "text-primary-foreground shadow-md" : "hover:scale-[1.02]"
-                  }`} style={bulkPreset === p ? { background: "var(--gradient-primary)" } : undefined}>
+                {PACKAGES.map((p) => (
+                  <label key={p.id} className={`glass flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                    bulkPreset === p.id ? "text-primary-foreground shadow-md" : "hover:scale-[1.02]"
+                  }`} style={bulkPreset === p.id ? { background: "var(--gradient-primary)" } : undefined}>
                     <input
                       type="radio"
                       name="bulkPreset"
-                      checked={bulkPreset === p}
-                      onChange={() => setBulkPreset(p)}
+                      checked={bulkPreset === p.id}
+                      onChange={() => {
+                        setBulkPreset(p.id);
+                        setMemberSelections((prev) => prev.map(() => p.id));
+                      }}
                       className="h-3.5 w-3.5 accent-[var(--color-primary)]"
                     />
-                    {label}
+                    {p.name}
                   </label>
-                  );
-                })}
+                ))}
                 <label className={`glass flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition ${
                   bulkPreset === "custom" ? "text-primary-foreground shadow-md" : "hover:scale-[1.02]"
                 }`} style={bulkPreset === "custom" ? { background: "var(--gradient-primary)" } : undefined}>
@@ -381,61 +433,80 @@ function NewSession() {
                   />
                   Custom ₹
                   <input
+                    id="bulk-custom-rate"
+                    name="bulk-custom-rate"
                     type="number"
                     min={0}
                     value={bulkCustom}
-                    onChange={(e) => { setBulkPreset("custom"); setBulkCustom(Number(e.target.value)); }}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setBulkPreset("custom");
+                      setBulkCustom(val);
+                      setMemberSelections((prev) => prev.map(() => val));
+                    }}
                     className="w-16 rounded-md bg-background/60 px-1.5 py-0.5 text-xs outline-none"
                   />
                 </label>
                 <button
                   type="button"
                   onClick={() => {
-                    const v = bulkPreset === "custom" ? bulkCustom : Number(bulkPreset);
-                    if (v === undefined || v === null || v < 0 || isNaN(v)) return toast.error("Pick a valid rate");
-                    setMemberRates((prev) => prev.map(() => v));
+                    const v = bulkPreset === "custom" ? bulkCustom : bulkPreset;
+                    setMemberSelections((prev) => prev.map(() => v));
+                    toast.info(`Applied to all ${totalPersons} members`);
                   }}
                   className="ml-auto inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow transition hover:scale-[1.02]"
                   style={{ background: "var(--gradient-primary)" }}
                 >
-                  <Check className="h-3.5 w-3.5" /> Apply to all {totalPersons} member{totalPersons === 1 ? "" : "s"}
+                  <Check className="h-3.5 w-3.5" /> Apply All
                 </button>
               </div>
             </div>
 
             {/* Per-member rate rows */}
             <div className="grid gap-2 sm:grid-cols-2">
-              {memberRates.map((rate, i) => {
+              {memberSelections.map((selection, i) => {
                 const isAdult = i < adults;
                 const label = isAdult ? `Adult ${i + 1}` : `Kid ${i - adults + 1}`;
+                const currentRate = getRate(selection);
                 return (
                   <div key={i} className="glass flex items-center justify-between gap-3 rounded-xl px-3 py-2">
                     <div className="text-sm">
                       <span className="font-semibold">{label}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      {[149, 199, 99, 0].map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => setMemberRates((prev) => prev.map((r, idx) => (idx === i ? p : r)))}
-                          className={`rounded-md px-2 py-1 text-xs font-bold transition ${
-                            rate === p ? "text-primary-foreground shadow" : "bg-muted/50 hover:bg-muted"
-                          }`}
-                          style={rate === p ? { background: "var(--gradient-primary)" } : undefined}
-                        >
-                          {p === 0 ? "Cafe" : `₹${p}`}
-                        </button>
-                      ))}
+                      {PACKAGES.map((pkg) => {
+                        let label = `₹${pkg.adultRate}`;
+                        if (pkg.id === "cafe-only") label = "Cafe";
+                        if (pkg.id === "kids-food-99") label = "Kids ₹99";
+                        if (pkg.id === "games-only-99") label = "Games ₹99";
+                        if (pkg.id === "games-food-149") label = "149+Food";
+
+                        const isActive = selection === pkg.id;
+
+                        return (
+                          <button
+                            key={pkg.id}
+                            type="button"
+                            onClick={() => setMemberSelections((prev) => prev.map((s, idx) => (idx === i ? pkg.id : s)))}
+                            className={`rounded-md px-2 py-1 text-[11px] font-bold transition ${
+                              isActive ? "text-primary-foreground shadow" : "bg-muted/50 hover:bg-muted"
+                            }`}
+                            style={isActive ? { background: "var(--gradient-primary)" } : undefined}
+                            title={pkg.name}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
                       <span className="ml-1 text-xs text-muted-foreground">or</span>
                       <span className="text-xs">₹</span>
                       <input
                         type="number"
                         min={0}
-                        value={rate}
+                        value={currentRate}
                         onChange={(e) =>
-                          setMemberRates((prev) =>
-                            prev.map((r, idx) => (idx === i ? Number(e.target.value) : r)),
+                          setMemberSelections((prev) =>
+                            prev.map((s, idx) => (idx === i ? Number(e.target.value) : s)),
                           )
                         }
                         className="glass w-16 rounded-md px-1.5 py-1 text-xs outline-none"
@@ -444,7 +515,7 @@ function NewSession() {
                   </div>
                 );
               })}
-              {memberRates.length === 0 && (
+              {memberSelections.length === 0 && (
                 <div className="text-xs text-muted-foreground">Add at least one adult or kid above to set rates.</div>
               )}
             </div>
@@ -528,23 +599,31 @@ function NewSession() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, id, children }: { label: string; id: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <label htmlFor={id} className="block">
       <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
       <div className="glass flex items-center gap-2 rounded-xl px-3 py-2.5">{children}</div>
     </label>
   );
 }
 
-function Counter({ label, value, onChange, min = 0 }: { label: string; value: number; onChange: (n: number) => void; min?: number }) {
+function Counter({ label, value, onChange, min = 0, max }: { label: string; value: number; onChange: (n: number) => void; min?: number; max?: number }) {
+  const atMax = max !== undefined && value >= max;
   return (
     <div>
       <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
       <div className="glass flex items-center justify-between rounded-xl px-2 py-1.5">
         <button type="button" onClick={() => onChange(Math.max(min, value - 1))} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Minus className="h-4 w-4" /></button>
         <span className="font-display text-xl font-bold tabular-nums">{value}</span>
-        <button type="button" onClick={() => onChange(value + 1)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Plus className="h-4 w-4" /></button>
+        <button
+          type="button"
+          onClick={() => { if (!atMax) onChange(value + 1); }}
+          disabled={atMax}
+          className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );

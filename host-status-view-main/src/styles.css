@@ -1,10 +1,9 @@
-@import "tailwindcss" source(none);
-@source "../src";
+@import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+@variant dark (&:is(.dark *));
 
-@theme inline {
+@theme {
   --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
   --font-display: "Sora", system-ui, sans-serif;
 
@@ -43,6 +42,8 @@
 }
 
 :root {
+
+  /* Base Variables */
   --radius: 1rem;
   --background: oklch(0.97 0.012 250);
   --foreground: oklch(0.22 0.04 265);
@@ -131,18 +132,20 @@
   h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
 }
 
-@utility glass {
-  background-color: var(--glass);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
-}
+@layer utilities {
+  .glass {
+    background-color: var(--glass);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
 
-@utility glass-strong {
-  background-color: color-mix(in oklab, var(--glass) 80%, var(--card));
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
+  .glass-strong {
+    background-color: color-mix(in oklab, var(--glass) 80%, var(--card));
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
 }

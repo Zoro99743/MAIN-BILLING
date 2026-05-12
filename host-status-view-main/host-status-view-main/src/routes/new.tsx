@@ -9,22 +9,17 @@ import { TABLE_CAPACITY, MENU_ITEMS, type PricingPlan, type TableId } from "@/li
 import { storage } from "@/lib/storage";
 import { sessionsApi } from "@/lib/sessions";
 import { formatDuration } from "@/lib/billing";
+import { EMPLOYEES } from "@/lib/employees";
 
 const searchSchema = z.object({ table: z.string().optional() });
 
 export const Route = createFileRoute("/new")({
   validateSearch: (s) => searchSchema.parse(s),
-  head: () => ({
-    meta: [
-      { title: "New Session — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Register a customer and assign tables." },
-    ],
-  }),
   component: () => (<RequireAuth><NewSession /></RequireAuth>),
 });
 
-// Default roster of cafe hosts (staff on shift). Can be extended on the fly.
-const DEFAULT_HOSTS = ["Praveenbalaji", "Vijayakumar", "Phebe"];
+// Host roster is derived from the central employees list — role "host" only.
+const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
 
 function NewSession() {
   const nav = useNavigate();
@@ -71,7 +66,7 @@ function NewSession() {
     return set;
   }, []);
 
-  // Hosts already attending an active session — they cannot take another customer.
+  // Hosts already attending an active session — useful for UI status but no longer a restriction.
   const busyHosts = useMemo(() => {
     const set = new Set<string>();
     sessionsApi.active().forEach((s) => {
@@ -134,19 +129,11 @@ function NewSession() {
   };
 
   const toggleHost = (h: string) => {
-    if (busyHosts.has(h)) {
-      toast.error(`${h} is already attending another customer`);
-      return;
-    }
     setHosts((prev) => prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h]);
   };
   const addHost = () => {
     const v = newHost.trim();
     if (!v) return;
-    if (busyHosts.has(v)) {
-      toast.error(`${v} is already attending another customer`);
-      return;
-    }
     if (!hostRoster.includes(v)) setHostRoster((r) => [...r, v]);
     if (!hosts.includes(v)) setHosts((h) => [...h, v]);
     setNewHost("");
@@ -166,7 +153,7 @@ function NewSession() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return toast.error("Customer name required");
-    if (!/^\d{10}$/.test(mobile)) return toast.error("Valid 10-digit mobile required");
+    if (mobile.trim() && !/^\d{10}$/.test(mobile)) return toast.error("Valid 10-digit mobile required");
     if (totalPersons < 1) return toast.error("At least 1 person required");
     if (tables.length === 0) return toast.error("No free tables available");
     if (totalPersons > capacity) return toast.error(`Selected tables fit ${capacity} people max`);
@@ -324,18 +311,14 @@ function NewSession() {
                     type="button"
                     key={h}
                     onClick={() => toggleHost(h)}
-                    disabled={busy}
-                    title={busy ? "Already attending another customer" : undefined}
                     className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                      busy
-                        ? "cursor-not-allowed opacity-40 line-through"
-                        : on ? "text-primary-foreground shadow-md" : "glass hover:scale-[1.03]"
+                      on ? "text-primary-foreground shadow-md" : "glass hover:scale-[1.03]"
                     }`}
-                    style={on && !busy ? { background: "var(--gradient-primary)" } : undefined}
+                    style={on ? { background: "var(--gradient-primary)" } : undefined}
                   >
                     {h}
-                    {busy && <span className="ml-1 text-[10px] uppercase">busy</span>}
-                    {on && !busy && <X className="ml-1 inline h-3 w-3" />}
+                    {busy && <span className="ml-1 text-[10px] opacity-70 uppercase">(busy)</span>}
+                    {on && <X className="ml-1 inline h-3 w-3" />}
                   </button>
                 );
               })}

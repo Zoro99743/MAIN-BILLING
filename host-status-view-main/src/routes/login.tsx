@@ -4,7 +4,6 @@ import { User, KeyRound, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStaff } from "@/components/AuthGuard";
-import { supabase } from "@/lib/supabase";
 import { EMPLOYEES } from "@/lib/employees";
 
 export const Route = createFileRoute("/login")({
@@ -19,7 +18,11 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { if (staff) nav({ to: "/" }); }, [staff, nav]);
+  useEffect(() => { 
+    if (staff) {
+      nav({ to: "/" }); 
+    }
+  }, [staff, nav]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,20 +42,14 @@ function LoginPage() {
       return toast.error("Invalid username or password");
     }
 
-    // Save/sync this valid employee to the Supabase database
-    try {
-      await supabase.from("staff").upsert({
-        id: validEmployee.passwordId, // using their ID as primary key
-        name: validEmployee.username,
-        role: validEmployee.role,
-        pin: validEmployee.passwordId, // store password in pin
-      }, { onConflict: "id" });
-    } catch (err) {
-      console.error("Failed to sync to db:", err);
-      // Proceed anyway, DB sync is optional for logging in if it's in our valid list
-    }
-
-    setStaff({ id: validEmployee.passwordId, name: validEmployee.username, role: validEmployee.role, mobile: "", loggedInAt: Date.now() });
+    // All employees in the list are authorized to log in if their ID matches
+    setStaff({ 
+      name: validEmployee.username, 
+      mobile: "", 
+      loggedInAt: Date.now(), 
+      role: validEmployee.role,
+      access: (validEmployee as any).access
+    } as any);
     toast.success(`Welcome back, ${validEmployee.username}!`);
     nav({ to: "/" });
   };
@@ -71,17 +68,23 @@ function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
-            <Field icon={<User className="h-4 w-4" />} label="Username (First Name)">
+            <Field icon={<User className="h-4 w-4" />} label="Username (First Name)" id="username">
               <input 
+                id="username"
+                name="username"
+                autoComplete="username"
                 value={username} 
                 onChange={(e) => setUsername(e.target.value)} 
                 placeholder="e.g. Praveenbalaji" 
                 className="w-full bg-transparent outline-none" 
               />
             </Field>
-            <Field icon={<KeyRound className="h-4 w-4" />} label="Password (ID)">
+            <Field icon={<KeyRound className="h-4 w-4" />} label="Password (ID)" id="password">
               <div className="flex w-full items-center">
                 <input 
+                  id="password"
+                  name="password"
+                  autoComplete="current-password"
                   type={showPassword ? "text" : "password"}
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
@@ -108,9 +111,9 @@ function LoginPage() {
   );
 }
 
-function Field({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+function Field({ icon, label, id, children }: { icon: React.ReactNode; label: string; id: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <label htmlFor={id} className="block">
       <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
       <div className="glass flex items-center gap-2 rounded-xl px-3 py-2.5">
         <span className="text-muted-foreground">{icon}</span>

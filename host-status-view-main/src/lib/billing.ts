@@ -80,9 +80,11 @@ export function chargeForPerson(p: Person, sessionEnd: number, subsequentRate: n
   const firstHourMs = Math.min(MS_PER_HOUR, presentMs);
   const extraMs = Math.max(0, presentMs - MS_PER_HOUR);
 
-  // Amounts: based on whole minutes only
-  const firstHourAmt = round((firstHourMs / MS_PER_HOUR) * p.firstHourRate);
-  const extraAmt = round((extraMs / MS_PER_HOUR) * subsequentRate);
+  // Amounts: first hour is a flat fee (minimum charge), subsequent time is pro-rated.
+  const firstHourAmt = firstHourMs > 0 ? p.firstHourRate : 0;
+  // If first hour is free (Cafe Only), subsequent hours are also free.
+  const rateForExtra = p.firstHourRate === 0 ? 0 : subsequentRate;
+  const extraAmt = round((extraMs / MS_PER_HOUR) * rateForExtra);
 
   const presentMin = presentMs / MS_PER_MIN;
   const firstHourMin = firstHourMs / MS_PER_MIN;
@@ -115,16 +117,22 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
 
     const qty = c.presentMs / MS_PER_HOUR; // fractional hours (minutes only, no seconds)
 
-    // ✅ Label shows "Xh Ym" — seconds never appear
-    const desc =
-      c.extraMs > 0
-        ? `Person ${c.person.label} (1h@₹${c.person.firstHourRate} + ${fmtDuration(c.extraMs)}@₹${subsequent})`
-        : `Person ${c.person.label} (${fmtDuration(c.presentMs)}@₹${c.person.firstHourRate})`;
+    // Use qtyLabel for the "Hour" column and rateLabel for the "Rate" column
+    const qtyLabel = fmtDuration(c.presentMs);
+    const rateLabel = c.extraMs > 0
+      ? `₹${c.person.firstHourRate}+₹${subsequent}`
+      : `₹${c.person.firstHourRate}`;
+
+    const startTime = new Date(c.person.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const endTime = new Date(Math.min(sessionEnd, c.person.leftAt ?? sessionEnd)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     lines.push({
-      label: desc,
-      qty,
-      rate: subsequent,
+      label: `Person ${c.person.label}`,
+      subLabel: `${startTime} - ${endTime}`,
+      qty: c.presentMs / MS_PER_HOUR,
+      qtyLabel,
+      rate: c.person.firstHourRate,
+      rateLabel,
       amount: c.total,
     });
   }
@@ -144,7 +152,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   }
 
   const subtotal = round(lines.reduce((a, l) => a + l.amount, 0));
-  const totalMs = floorToMinutes(Math.max(0, sessionEnd - s.startedAt));
+  const totalMs = Math.max(0, floorToMinutes(sessionEnd) - floorToMinutes(s.startedAt));
 
   return {
     sessionId: s.id,
@@ -171,6 +179,7 @@ export function formatDuration(ms: number) {
 
 /** Bill display — only shows HH:MM */
 export function formatDurationMin(ms: number) {
+  // Use floor to match billing calculation (no pro-rating of partial seconds)
   const totalMin = Math.max(0, Math.floor(ms / 60000));
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;

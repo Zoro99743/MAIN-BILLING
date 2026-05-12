@@ -3,16 +3,17 @@ export interface Employee {
   fullName: string;
   role: string;
   passwordId: string;
+  access?: string;
 }
 
 export const EMPLOYEES: Employee[] = [
-  { username: "Suganya", fullName: "Suganya Arunkumar", role: "admin", passwordId: "PHSA01" },
-  { username: "Arunkumar", fullName: "Arunkumar Thangaraj", role: "admin", passwordId: "PHAT02" },
-  { username: "Praveenbalaji", fullName: "Praveenbalaji S", role: "host", passwordId: "PHPS03" },
-  { username: "Suchit", fullName: "Suchit Jeeva", role: "cook", passwordId: "PHSJ04" },
-  { username: "SRI RAAMAN S", fullName: "SRI RAAMAN S", role: "editor", passwordId: "PHSR05" },
-  { username: "Vijayakumar", fullName: "Vijayakumar M", role: "host", passwordId: "PHVK06" },
-  { username: "Arun", fullName: "Arun Kumar", role: "cook", passwordId: "PHAK07" },
-  { username: "Sanjay", fullName: "Sanjay Nagabalan", role: "admin", passwordId: "PHSN08" },
-  { username: "Phebe", fullName: "Phebe Jusnita", role: "host", passwordId: "PHPJ03" },
+  { username: "Suganya", fullName: "Suganya Arunkumar", role: "Stakeholder", passwordId: "PHSA01", access: "Full" },
+  { username: "Arunkumar", fullName: "Arunkumar Thangaraj", role: "Stakeholder", passwordId: "PHAT02", access: "Full" },
+  { username: "Praveenbalaji", fullName: "Praveenbalaji S", role: "Host", passwordId: "PHPS03", access: "Low" },
+  { username: "Suchit", fullName: "Suchit Jeeva", role: "Cook", passwordId: "PHSJ04", access: "Low" },
+  { username: "SRI RAAMAN", fullName: "SRI RAAMAN S", role: "Video Editor", passwordId: "PHSR05", access: "Low" },
+  { username: "Vijayakumar", fullName: "Vijayakumar Kumar", role: "Host", passwordId: "PHVK06", access: "Low" },
+  { username: "Arun", fullName: "Arun", role: "Cook", passwordId: "PHAK07", access: "Low" },
+  { username: "Sanjay", fullName: "Sanjay Nagabalan", role: "Admin", passwordId: "PHSN08", access: "Full" },
+  { username: "Phebe", fullName: "Phebe Jusnita", role: "Host", passwordId: "PHPJ03", access: "Low" },
 ];

@@ -2,7 +2,7 @@
 // Every person has their own joinedAt (and optional leftAt). For each person:
 //   • first 60 minutes of THEIR presence is billed at their `firstHourRate`
 //   • every minute beyond that is billed at the session's `subsequentRate`
-// All amounts are pro-rated to the SECOND (exact, no rounding of time).
+// All amounts are pro-rated to the MINUTE only (seconds are always truncated).
 //
 // If a session has no `persons` array (legacy data), we synthesise one from
 // `adults` + `kids` + `pricing.memberRates` so old sessions still bill correctly.
@@ -10,21 +10,23 @@
 import type { Bill, BillLine, Person, Session } from "./types";
 import { MENU_ITEMS } from "./types";
 
-const MS_PER_SEC = 1_000;
 const MS_PER_MIN = 60_000;
 const MS_PER_HOUR = 3_600_000;
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/** Format seconds as "Xh Ym Zs" for receipt labels */
+/** Truncate ms down to the nearest whole minute (drop seconds entirely) */
+function floorToMinutes(ms: number): number {
+  return Math.floor(ms / MS_PER_MIN) * MS_PER_MIN;
+}
+
+/** Format ms as "Xh Ym" — no seconds ever shown */
 function fmtDuration(ms: number): string {
-  const totalSec = Math.floor(ms / MS_PER_SEC);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
+  const totalMin = Math.floor(ms / MS_PER_MIN);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
   const parts: string[] = [];
   if (h > 0) parts.push(`${h}h`);
-  if (m > 0) parts.push(`${m}m`);
-  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+  if (m > 0 || parts.length === 0) parts.push(`${m}m`);
   return parts.join(" ");
 }
 
@@ -56,12 +58,12 @@ export function ensurePersons(s: Session): Person[] {
 
 export interface PersonCharge {
   person: Person;
-  presentMs: number;       // exact milliseconds present
-  presentMin: number;      // exact fractional minutes (for legacy compat)
-  firstHourMs: number;     // ms billed at first-hour rate
+  presentMs: number;       // ms present, floored to whole minutes
+  presentMin: number;      // whole minutes present
+  firstHourMs: number;     // ms billed at first-hour rate (max 60 min)
   extraMs: number;         // ms billed at subsequent rate
-  firstHourMin: number;
-  extraMin: number;
+  firstHourMin: number;    // whole minutes in first hour
+  extraMin: number;        // whole minutes beyond first hour
   firstHourAmt: number;
   extraAmt: number;
   total: number;
@@ -69,17 +71,19 @@ export interface PersonCharge {
 
 export function chargeForPerson(p: Person, sessionEnd: number, subsequentRate: number): PersonCharge {
   const end = Math.min(p.leftAt ?? sessionEnd, sessionEnd);
-  const presentMs = Math.max(0, end - p.joinedAt);
+  const rawMs = Math.max(0, end - p.joinedAt);
 
-  // Split at exactly 1 hour (3 600 000 ms) — no rounding
+  // ✅ Drop seconds — only count whole minutes
+  const presentMs = floorToMinutes(rawMs);
+
+  // Split at exactly 60 minutes
   const firstHourMs = Math.min(MS_PER_HOUR, presentMs);
   const extraMs = Math.max(0, presentMs - MS_PER_HOUR);
 
-  // Amounts: divide by MS_PER_HOUR for exact fractional hours
+  // Amounts: based on whole minutes only
   const firstHourAmt = round((firstHourMs / MS_PER_HOUR) * p.firstHourRate);
   const extraAmt = round((extraMs / MS_PER_HOUR) * subsequentRate);
 
-  // Keep minute fields for any legacy callers
   const presentMin = presentMs / MS_PER_MIN;
   const firstHourMin = firstHourMs / MS_PER_MIN;
   const extraMin = extraMs / MS_PER_MIN;
@@ -109,20 +113,19 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   for (const c of charges) {
     if (c.presentMs <= 0) continue;
 
-    // qty: exact fractional hours (NOT rounded to 2dp) — so receipt math is consistent
-    const qty = c.presentMs / MS_PER_HOUR;
+    const qty = c.presentMs / MS_PER_HOUR; // fractional hours (minutes only, no seconds)
 
-    // Label: show human-readable exact duration instead of rounded hours
+    // ✅ Label shows "Xh Ym" — seconds never appear
     const desc =
       c.extraMs > 0
         ? `Person ${c.person.label} (1h@₹${c.person.firstHourRate} + ${fmtDuration(c.extraMs)}@₹${subsequent})`
-        : `Person ${c.person.label} (${fmtDuration(c.presentMs)})`;
+        : `Person ${c.person.label} (${fmtDuration(c.presentMs)}@₹${c.person.firstHourRate})`;
 
     lines.push({
       label: desc,
-      qty,                          // exact — no toFixed/round on qty
+      qty,
       rate: subsequent,
-      amount: c.total,              // amount is always the source of truth
+      amount: c.total,
     });
   }
 
@@ -141,7 +144,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   }
 
   const subtotal = round(lines.reduce((a, l) => a + l.amount, 0));
-  const totalMs = Math.max(0, sessionEnd - s.startedAt);
+  const totalMs = floorToMinutes(Math.max(0, sessionEnd - s.startedAt));
 
   return {
     sessionId: s.id,
@@ -157,6 +160,7 @@ export function computeBill(s: Session, endedAt: number = Date.now()): Bill {
   };
 }
 
+/** Live timer display — still shows HH:MM:SS for the running clock only */
 export function formatDuration(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
@@ -165,7 +169,15 @@ export function formatDuration(ms: number) {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-// helper exported for UI summaries
+/** Bill display — only shows HH:MM */
+export function formatDurationMin(ms: number) {
+  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+// Helper exported for UI summaries
 export function summarisePersons(s: Session, now: number = Date.now()) {
   const persons = ensurePersons(s);
   const subsequent = s.pricing.subsequentRate ?? 99;

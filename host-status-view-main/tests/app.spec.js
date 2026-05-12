@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('test', async ({ page }) => {
-  await page.goto('http://192.168.29.107:8080/login');
+  await page.goto('/login');
   await page.getByRole('textbox', { name: 'Username (First Name)' }).click();
   await page.getByRole('textbox', { name: 'Username (First Name)' }).press('CapsLock');
   await page.getByRole('textbox', { name: 'Username (First Name)' }).fill('PRAVEENBALAJI');
@@ -39,5 +39,5 @@ test('test', async ({ page }) => {
   await page.getByText('0').nth(2).click();
   await page.getByText('0').nth(1).click();
   await page.getByRole('link', { name: 'History' }).click();
-  await page.goto('http://192.168.29.107:8080/');
+  await page.goto('/');
 });

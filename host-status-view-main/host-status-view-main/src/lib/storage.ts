@@ -7,42 +7,46 @@ const KEYS = {
   sessions: "ph_sessions",
   theme: "ph_theme",
   tables: "ph_tables",
+  hosts: "ph_hosts",
 };
 
 // ──────────────────────────────────────────────
-// Supabase Realtime: subscribe to the "app_data" table, row id = "sessions"
-// Table schema:  id (text, PK) | data (jsonb) | updated_at (timestamptz)
+// Supabase Sync logic for all app data
 // ──────────────────────────────────────────────
+const SYNC_KEYS = ["sessions", "tables", "hosts"] as const;
+
 if (typeof window !== "undefined") {
-  // 1. Initial fetch
+  // 1. Initial fetch of all keys
   supabase
     .from("app_data")
-    .select("data")
-    .eq("id", "sessions")
-    .maybeSingle()
+    .select("*")
+    .in("id", SYNC_KEYS)
     .then(({ data }) => {
-      if (data?.data?.list) {
-        localStorage.setItem(KEYS.sessions, JSON.stringify(data.data.list));
-        window.dispatchEvent(new CustomEvent("ph_sessions_changed"));
-      }
+      data?.forEach((row) => {
+        const key = row.id as (typeof SYNC_KEYS)[number];
+        if (row.data?.list) {
+          localStorage.setItem(`ph_${key}`, JSON.stringify(row.data.list));
+          window.dispatchEvent(new CustomEvent(`ph_${key}_changed`));
+        }
+      });
     });
 
-  // 2. Realtime subscription
+  // 2. Realtime subscription for all app data
   supabase
-    .channel("app_data_sessions")
+    .channel("app_data_all")
     .on(
       "postgres_changes",
       {
         event: "*",
         schema: "public",
         table: "app_data",
-        filter: "id=eq.sessions",
       },
       (payload: any) => {
+        const id = payload.new?.id as (typeof SYNC_KEYS)[number];
         const newData = payload.new?.data;
-        if (newData?.list) {
-          localStorage.setItem(KEYS.sessions, JSON.stringify(newData.list));
-          window.dispatchEvent(new CustomEvent("ph_sessions_changed"));
+        if (SYNC_KEYS.includes(id) && newData?.list) {
+          localStorage.setItem(`ph_${id}`, JSON.stringify(newData.list));
+          window.dispatchEvent(new CustomEvent(`ph_${id}_changed`));
         }
       }
     )
@@ -65,24 +69,9 @@ export const storage = {
     return raw ? JSON.parse(raw) : [];
   },
   setSessions(list: Session[]) {
-    // 1. Update local immediately for snappy UI
     localStorage.setItem(KEYS.sessions, JSON.stringify(list));
     window.dispatchEvent(new CustomEvent("ph_sessions_changed"));
-
-    // 2. Sync to Supabase (upsert the single "sessions" row)
-    try {
-      supabase
-        .from("app_data")
-        .upsert(
-          { id: "sessions", data: { list }, updated_at: new Date().toISOString() },
-          { onConflict: "id" }
-        )
-        .then(({ error }) => {
-          if (error) console.error("Supabase sync error:", error.message);
-        });
-    } catch (error) {
-      console.error("Supabase sync failed:", error);
-    }
+    this.syncToSupabase("sessions", list);
   },
   getTheme(): "light" | "dark" {
     if (typeof window === "undefined") return "light";
@@ -98,6 +87,33 @@ export const storage = {
   },
   setTables(list: string[]) {
     localStorage.setItem(KEYS.tables, JSON.stringify(list));
-    window.dispatchEvent(new Event("ph_tables_changed"));
+    window.dispatchEvent(new CustomEvent("ph_tables_changed"));
+    this.syncToSupabase("tables", list);
+  },
+  getHosts(): string[] {
+    if (typeof window === "undefined") return [];
+    const raw = localStorage.getItem(KEYS.hosts);
+    return raw ? JSON.parse(raw) : [];
+  },
+  setHosts(list: string[]) {
+    localStorage.setItem(KEYS.hosts, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent("ph_hosts_changed"));
+    this.syncToSupabase("hosts", list);
+  },
+  // Private helper for Supabase sync
+  syncToSupabase(id: string, list: any[]) {
+    try {
+      supabase
+        .from("app_data")
+        .upsert(
+          { id, data: { list }, updated_at: new Date().toISOString() },
+          { onConflict: "id" }
+        )
+        .then(({ error }) => {
+          if (error) console.error(`Supabase sync error (${id}):`, error.message);
+        });
+    } catch (error) {
+      console.error(`Supabase sync failed (${id}):`, error);
+    }
   },
 };

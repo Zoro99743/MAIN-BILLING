@@ -1,5 +1,6 @@
 import { storage } from "./storage";
-import { type Person, type PricingPlan, type Session, type TableId } from "./types";
+import { MENU_ITEMS, type Person, type PricingPlan, type Session, type TableId } from "./types";
+import { supabase } from "./supabase";
 import { syncRegistration, syncBill } from "@/server/sheets.functions";
 import { computeBill, ensurePersons } from "./billing";
 
@@ -123,18 +124,33 @@ export const sessionsApi = {
     const s = all.find((x) => x.id === id);
     if (!s) return;
     const oldStart = s.startedAt;
+    const oldEnd = s.endedAt;
     const persons = ensurePersons(s).slice();
+    
+    // Threshold for matching timestamps (1 second) to handle millisecond precision loss in UI inputs
+    const isSameTime = (t1: number, t2?: number) => t2 !== undefined && Math.abs(t1 - t2) < 1000;
+
     persons.forEach((p) => {
-      if (p.joinedAt === oldStart) p.joinedAt = newStart;
+      // If they joined at (or very close to) the session start, move them to the new start
+      if (isSameTime(p.joinedAt, oldStart)) p.joinedAt = newStart;
+      // Clamp join time to never be before session start
       if (p.joinedAt < newStart) p.joinedAt = newStart;
+
       if (newEnd) {
+        // If they were capped at the old session end, move them to the new end
+        if (isSameTime(p.leftAt ?? -1, oldEnd)) p.leftAt = newEnd;
+        // Clamp left time to never be after session end
         if (p.leftAt && p.leftAt > newEnd) p.leftAt = newEnd;
+        // Clamp join time to never be after session end
         if (p.joinedAt > newEnd) p.joinedAt = newEnd;
+      } else {
+        // Switching back to Live: if they were capped at oldEnd, make them active again
+        if (isSameTime(p.leftAt ?? -1, oldEnd)) p.leftAt = undefined;
       }
     });
     s.persons = persons;
     s.startedAt = newStart;
-    s.history = s.history.map((h) => (h.at === oldStart ? { ...h, at: newStart } : h));
+    s.history = s.history.map((h) => (isSameTime(h.at, oldStart) ? { ...h, at: newStart } : h));
     s.endedAt = newEnd;
     storage.setSessions(all);
   },
@@ -201,16 +217,66 @@ export const sessionsApi = {
     s.tableIds = Array.from(set);
     storage.setSessions(all);
   },
+  removeTable(id: string, table: TableId) {
+    const all = storage.getSessions();
+    const s = all.find((x) => x.id === id);
+    if (!s) return;
+    s.tableIds = s.tableIds.filter((t) => t !== table);
+    storage.setSessions(all);
+  },
   freeTables(): TableId[] {
     const taken = new Set<TableId>();
     storage.getSessions().filter((s) => s.status === "active").forEach((s) => s.tableIds.forEach((t) => taken.add(t)));
     return storage.getTables().filter((t) => !taken.has(t));
   },
+  async sendNewOrdersToKitchen(id: string) {
+    const all = storage.getSessions();
+    const s = all.find((x) => x.id === id);
+    if (!s) return;
+
+    const current = s.menuOrders ?? {};
+    const sent = s.sentOrders ?? {};
+    
+    const newItems: Array<{ name: string; qty: number }> = [];
+    
+    Object.entries(current).forEach(([itemId, qty]) => {
+      const alreadySent = sent[itemId] ?? 0;
+      if (qty > alreadySent) {
+        const item = MENU_ITEMS.find(m => m.id === itemId);
+        newItems.push({
+          name: item?.label || itemId,
+          qty: qty - alreadySent
+        });
+      }
+    });
+
+    if (newItems.length === 0) return;
+
+    const { error } = await supabase.from("orders").insert({
+      session_id: s.id,
+      table_number: s.tableIds.join(", "),
+      customer_count: (s.persons?.filter(p => !p.leftAt).length) || (s.adults + s.kids),
+      items: newItems,
+      created_at: new Date().toISOString()
+    });
+
+    if (!error) {
+      s.sentOrders = { ...current };
+      storage.setSessions(all);
+      return true;
+    } else {
+      console.error("Kitchen sync error:", error);
+      throw error;
+    }
+  },
   complete(id: string) {
     const all = storage.getSessions();
     const s = all.find((x) => x.id === id);
     if (!s) return null;
-    const endedAt = Date.now();
+    
+    // Respect manually set end time if present, otherwise use now
+    const endedAt = s.endedAt || Date.now();
+    
     s.status = "completed";
     s.endedAt = endedAt;
     // close any still-active persons at end time

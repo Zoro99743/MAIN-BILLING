@@ -11,12 +11,6 @@ import { computeBill, ensurePersons, formatDuration, summarisePersons } from "@/
 import { useTick } from "@/hooks/use-tick";
 
 export const Route = createFileRoute("/session/$id")({
-  head: () => ({
-    meta: [
-      { title: "Session — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Active session timer, person management, and billing." },
-    ],
-  }),
   component: () => (<RequireAuth><SessionPage /></RequireAuth>),
 });
 
@@ -278,12 +272,14 @@ function SessionPage() {
         {editTimer && (
           <EditTimerModal
             startedAt={session.startedAt}
+            endedAt={session.endedAt}
             now={now}
             onCancel={() => setEditTimer(false)}
-            onSave={(newStart) => {
+            onSave={(newStart, newEnd) => {
               if (newStart > Date.now()) return toast.error("Start time can't be in the future");
-              sessionsApi.setStartedAt(session.id, newStart);
-              toast.success("Start time updated — bill recalculated");
+              if (newEnd && newEnd < newStart) return toast.error("End time can't be before start time");
+              sessionsApi.updateSessionTimes(session.id, newStart, newEnd);
+              toast.success("Timer updated — bill recalculated");
               setEditTimer(false);
             }}
           />
@@ -300,36 +296,75 @@ function SessionPage() {
   );
 }
 
-function EditTimerModal({ startedAt, now, onCancel, onSave }: { startedAt: number; now: number; onCancel: () => void; onSave: (ms: number) => void }) {
+function EditTimerModal({ startedAt, endedAt, now, onCancel, onSave }: { startedAt: number; endedAt?: number; now: number; onCancel: () => void; onSave: (start: number, end?: number) => void }) {
   const toLocalInput = (ms: number) => {
     const d = new Date(ms);
     const pad = (n: number) => n.toString().padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
-  const [val, setVal] = useState(toLocalInput(startedAt));
-  const ms = useMemo(() => new Date(val).getTime(), [val]);
+
+  const [startVal, setStartVal] = useState(toLocalInput(startedAt));
+  const [endVal, setEndVal] = useState(endedAt ? toLocalInput(endedAt) : "");
+  const [useEndTime, setUseEndTime] = useState(!!endedAt);
+
+  const startMs = useMemo(() => new Date(startVal).getTime(), [startVal]);
+  const endMs = useMemo(() => (useEndTime && endVal ? new Date(endVal).getTime() : undefined), [useEndTime, endVal]);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm">
       <div className="glass-strong w-full max-w-sm rounded-3xl p-6 shadow-2xl">
-        <h3 className="font-display text-xl font-bold">Edit start time</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Adjusts elapsed time and recalculates every person's bill.</p>
-        <input
-          type="datetime-local"
-          step="1"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          className="mt-4 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-        />
+        <h3 className="font-display text-xl font-bold">Edit Session Timer</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Adjust start and end times to recalculate the bill.</p>
+        
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Start Time</label>
+            <input
+              type="datetime-local"
+              step="1"
+              value={startVal}
+              onChange={(e) => setStartVal(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">End Time</label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">{useEndTime ? "Enabled" : "Live"}</span>
+                <button 
+                  onClick={() => {
+                    if (!useEndTime && !endVal) setEndVal(toLocalInput(Date.now()));
+                    setUseEndTime(!useEndTime);
+                  }}
+                  className={`h-4 w-8 rounded-full p-0.5 transition-colors ${useEndTime ? "bg-primary" : "bg-muted"}`}
+                >
+                  <div className={`h-3 w-3 rounded-full bg-white transition-transform ${useEndTime ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+              </div>
+            </div>
+            <input
+              type="datetime-local"
+              step="1"
+              disabled={!useEndTime}
+              value={endVal}
+              onChange={(e) => setEndVal(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
+            />
+          </div>
+        </div>
+
         <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-          <div>Start: <span className="font-medium tabular-nums text-foreground">{new Date(startedAt).toLocaleTimeString()}</span></div>
+          <div>Original: <span className="font-medium tabular-nums text-foreground">{new Date(startedAt).toLocaleTimeString()}</span></div>
           <div>Real time: <span className="font-medium tabular-nums text-foreground">{new Date(now).toLocaleTimeString()}</span></div>
         </div>
+
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onCancel} className="glass rounded-full px-5 py-2.5 text-sm font-medium">Cancel</button>
           <button
-            onClick={() => onSave(ms)}
-            disabled={!Number.isFinite(ms)}
+            onClick={() => onSave(startMs, endMs)}
+            disabled={!Number.isFinite(startMs) || (useEndTime && !Number.isFinite(endMs))}
             className="rounded-full px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg transition hover:scale-[1.02] disabled:opacity-50"
             style={{ background: "var(--gradient-primary)" }}
           >Save</button>

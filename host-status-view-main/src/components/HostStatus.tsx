@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { UserCheck, UserX, Plus } from "lucide-react";
+import { UserCheck, UserX, Plus, X } from "lucide-react";
 import { sessionsApi } from "@/lib/sessions";
 import type { Session } from "@/lib/types";
 import { EMPLOYEES } from "@/lib/employees";
 
-// Derived from the central employees list — only staff with the Host role appear here.
-const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
+// Derived from the central employees list — only staff with the 'Host' role appear here.
+const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role.toLowerCase() === "host").map((e) => e.username);
 import { storage } from "@/lib/storage";
 
 interface HostInfo {
@@ -13,32 +13,57 @@ interface HostInfo {
   busy: boolean;
   tables: string[];
   customers: string[];
+  customerCount: number;
 }
 
 export function HostStatus() {
   const [active, setActive] = useState<Session[]>([]);
   const [customHosts, setCustomHosts] = useState<string[]>(storage.getHosts());
+  const [hiddenHosts, setHiddenHosts] = useState<string[]>(() => {
+    return JSON.parse(localStorage.getItem("ph_hidden_hosts") || "[]");
+  });
+
   useEffect(() => {
     const refresh = () => setActive(sessionsApi.active());
     refresh();
     const handleHostsChanged = () => setCustomHosts(storage.getHosts());
+    const handleHiddenChanged = () => setHiddenHosts(JSON.parse(localStorage.getItem("ph_hidden_hosts") || "[]"));
+    
     window.addEventListener("ph_sessions_changed", refresh);
     window.addEventListener("ph_hosts_changed", handleHostsChanged);
+    window.addEventListener("ph_hidden_hosts_changed", handleHiddenChanged);
     return () => {
       window.removeEventListener("ph_sessions_changed", refresh);
       window.removeEventListener("ph_hosts_changed", handleHostsChanged);
+      window.removeEventListener("ph_hidden_hosts_changed", handleHiddenChanged);
     };
   }, []);
 
   const allHosts = useMemo(() => {
-    return Array.from(new Set([...DEFAULT_HOSTS, ...customHosts]));
-  }, [customHosts]);
+    return Array.from(new Set([...DEFAULT_HOSTS, ...customHosts])).filter((h) => !hiddenHosts.includes(h));
+  }, [customHosts, hiddenHosts]);
+
+  const removeHost = (name: string) => {
+    if (window.confirm(`Remove ${name} from the floor?`)) {
+      if (customHosts.includes(name)) {
+        const next = customHosts.filter((h) => h !== name);
+        storage.setHosts(next);
+        setCustomHosts(next);
+      }
+      if (DEFAULT_HOSTS.includes(name)) {
+        const next = [...hiddenHosts, name];
+        localStorage.setItem("ph_hidden_hosts", JSON.stringify(next));
+        setHiddenHosts(next);
+        window.dispatchEvent(new CustomEvent("ph_hidden_hosts_changed"));
+      }
+    }
+  };
 
   const hosts: HostInfo[] = useMemo(() => {
     const map = new Map<string, HostInfo>();
     // Seed roster with defaults so they always appear (as free if not assigned).
     allHosts.forEach((n) =>
-      map.set(n, { name: n, busy: false, tables: [], customers: [] }),
+      map.set(n, { name: n, busy: false, tables: [], customers: [], customerCount: 0 }),
     );
     // Fold in any host currently attending an active session.
     for (const s of active) {
@@ -46,10 +71,11 @@ export function HostStatus() {
       for (const raw of names) {
         const name = raw.trim();
         if (!name) continue;
-        const existing = map.get(name) ?? { name, busy: false, tables: [], customers: [] };
+        const existing = map.get(name) ?? { name, busy: false, tables: [], customers: [], customerCount: 0 };
         existing.busy = true;
         existing.tables.push(...s.tableIds);
         existing.customers.push(s.customerName);
+        existing.customerCount += s.persons ? s.persons.filter(p => !p.leftAt).length : (s.adults + s.kids);
         map.set(name, existing);
       }
     }
@@ -121,15 +147,26 @@ export function HostStatus() {
                       h.busy ? "text-primary" : "text-success"
                     }`}
                   >
-                    {h.busy ? "Busy" : "Free"}
+                    {h.busy ? `${h.customerCount} attending` : "Free"}
                   </div>
                 </div>
               </div>
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  h.busy ? "bg-primary animate-pulse" : "bg-success"
-                }`}
-              />
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    h.busy ? "bg-primary animate-pulse" : "bg-success"
+                  }`}
+                />
+                {!h.busy && (
+                  <button
+                    onClick={() => removeHost(h.name)}
+                    className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition"
+                    title="Remove host"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {h.busy && (

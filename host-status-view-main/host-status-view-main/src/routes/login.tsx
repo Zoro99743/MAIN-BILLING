@@ -8,12 +8,6 @@ import { supabase } from "@/lib/supabase";
 import { EMPLOYEES } from "@/lib/employees";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({
-    meta: [
-      { title: "Staff Login — Billing System For PlayHouse Cafe" },
-      { name: "description", content: "Secure staff login." },
-    ],
-  }),
   component: LoginPage,
 });
 
@@ -58,7 +52,7 @@ function LoginPage() {
       // Proceed anyway, DB sync is optional for logging in if it's in our valid list
     }
 
-    setStaff({ name: validEmployee.username, mobile: "", loggedInAt: Date.now() });
+    setStaff({ id: validEmployee.passwordId, name: validEmployee.username, role: validEmployee.role, mobile: "", loggedInAt: Date.now() });
     toast.success(`Welcome back, ${validEmployee.username}!`);
     nav({ to: "/" });
   };

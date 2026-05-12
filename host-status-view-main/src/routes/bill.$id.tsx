@@ -5,7 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { AppHeader } from "@/components/AppHeader";
 import { RequireAuth } from "@/components/AuthGuard";
 import { sessionsApi } from "@/lib/sessions";
-import { computeBill, formatDurationMin, ensurePersons } from "@/lib/billing";
+import { computeBill, formatDuration, ensurePersons } from "@/lib/billing";
 
 export const Route = createFileRoute("/bill/$id")({
   component: () => (<RequireAuth><BillPage /></RequireAuth>),
@@ -21,7 +21,7 @@ const CAFE_ADDRESS_LINE_3 = "Coimbatore, Tamil Nadu 641004";
 const FIRST_HOUR_RATE = 149;
 const EXTRA_HOUR_RATE = 99;
 
-type BillLine = { label: string; qty: number; rate: number; amount: number };
+
 
 
 function BillPage() {
@@ -128,9 +128,9 @@ function BillPage() {
             <dt>Mobile</dt><dd className="text-right">{bill.customerMobile}</dd>
             <dt>Table(s)</dt><dd className="text-right">{bill.tables.join(", ") || "—"}</dd>
             <dt>Persons</dt><dd className="text-right">{totalAdults} adult{totalAdults!==1?"s":""}{totalKids>0?` + ${totalKids} kid${totalKids!==1?"s":""}`:""}</dd>
-            <dt>In time</dt><dd className="text-right">{new Date(bill.startedAt).toLocaleString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</dd>
-            <dt>Out time</dt><dd className="text-right">{new Date(bill.endedAt).toLocaleString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</dd>
-            <dt>Duration</dt><dd className="text-right tabular-nums">{formatDurationMin(bill.endedAt - bill.startedAt)}</dd>
+            <dt>In time</dt><dd className="text-right">{new Date(bill.startedAt).toLocaleString()}</dd>
+            <dt>Out time</dt><dd className="text-right">{new Date(bill.endedAt).toLocaleString()}</dd>
+            <dt>Duration</dt><dd className="text-right tabular-nums">{formatDuration(bill.endedAt - bill.startedAt)}</dd>
           </dl>
 
           <div className="t-divider my-2 border-t border-dashed border-border" />
@@ -139,20 +139,26 @@ function BillPage() {
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide">
                 <th className="pb-1">Item</th>
-                <th className="pb-1 pl-2 text-right">Qty</th>
+                <th className="pb-1 pl-2 text-right">Hour</th>
                 <th className="pb-1 pl-2 text-right">Rate</th>
                 <th className="pb-1 pl-2 text-right">Amt</th>
               </tr>
             </thead>
             <tbody>
-              {bill.lines.map((l, i) => (
-                <tr key={i} className="border-t border-border">
-                  <td className="py-1 pr-1">{l.label}</td>
-                  <td className="py-1 pl-2 text-right tabular-nums">{l.qty.toFixed(2)}</td>
-                  <td className="py-1 pl-2 text-right tabular-nums">₹{l.rate}</td>
-                  <td className="py-1 pl-2 text-right tabular-nums">₹{l.amount.toFixed(2)}</td>
-                </tr>
-              ))}
+              {bill.lines.map((l, i) => {
+                const isPerson = l.label.startsWith("Person ");
+                return (
+                  <tr key={i} className="border-t border-border">
+                    <td className="py-1 pr-1">
+                      <div>{l.label}</div>
+                      {l.subLabel && <div className="text-[10px] font-medium text-muted-foreground">{l.subLabel}</div>}
+                    </td>
+                    <td className="py-1 pl-2 text-right tabular-nums">{l.qtyLabel ?? l.qty.toFixed(2)}</td>
+                    <td className="py-1 pl-2 text-right tabular-nums">{l.rateLabel ?? `₹${l.rate}`}</td>
+                    <td className="py-1 pl-2 text-right tabular-nums">₹{l.amount.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

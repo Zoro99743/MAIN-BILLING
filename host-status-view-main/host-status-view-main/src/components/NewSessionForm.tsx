@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Users, Clock, User, Phone, TableProperties } from "lucide-react";
 import { sessionsApi } from "@/lib/sessions";
 import { storage } from "@/lib/storage";
 import { toast } from "sonner";
+import { EMPLOYEES } from "@/lib/employees";
 
-const DEFAULT_HOSTS = ["Praveenbalaji", "Vijayakumar", "Phebe"];
+const DEFAULT_HOSTS = EMPLOYEES.filter((e) => e.role === "host").map((e) => e.username);
 
 export function NewSessionForm() {
   const navigate = useNavigate();
@@ -20,6 +21,17 @@ export function NewSessionForm() {
   const [selectedTable, setSelectedTable] = useState(search.table ?? tables[0] ?? "");
   const [selectedHosts, setSelectedHosts] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [customHosts, setCustomHosts] = useState<string[]>(storage.getHosts());
+
+  useEffect(() => {
+    const handleHostsChanged = () => setCustomHosts(storage.getHosts());
+    window.addEventListener("ph_hosts_changed", handleHostsChanged);
+    return () => window.removeEventListener("ph_hosts_changed", handleHostsChanged);
+  }, []);
+
+  const allHosts = useMemo(() => {
+    return Array.from(new Set([...DEFAULT_HOSTS, ...customHosts]));
+  }, [customHosts]);
 
   const toggleHost = (name: string) => {
     setSelectedHosts((prev) =>
@@ -28,10 +40,10 @@ export function NewSessionForm() {
   };
 
   const handleSubmit = () => {
-    if (!customerName.trim() || !mobile.trim()) {
-      setError("Customer name and mobile are required.");
-      window.alert("Customer details are missing! Please enter both the customer's name and mobile number on the spot.");
-      toast.error("Customer details are required.");
+    if (!customerName.trim()) {
+      setError("Customer name is required.");
+      window.alert("Customer name is missing! Please enter the customer's name.");
+      toast.error("Customer name is required.");
       return;
     }
     if (!selectedTable) {
@@ -188,7 +200,7 @@ export function NewSessionForm() {
             <User className="h-3.5 w-3.5" /> Assign Hosts
           </label>
           <div className="flex flex-wrap gap-2">
-            {DEFAULT_HOSTS.map((h) => (
+            {allHosts.map((h) => (
               <button
                 key={h}
                 onClick={() => toggleHost(h)}

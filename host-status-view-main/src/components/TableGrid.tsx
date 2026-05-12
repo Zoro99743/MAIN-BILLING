@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Clock, Users, Plus } from "lucide-react";
+import { Clock, Users, Plus, Trash2 } from "lucide-react";
 import type { Session, TableId } from "@/lib/types";
 import { storage } from "@/lib/storage";
 import { sessionsApi } from "@/lib/sessions";
 import { formatDuration } from "@/lib/billing";
+import { toast } from "sonner";
+import { MoveRight } from "lucide-react";
 
 interface Props { tick: number }
 
@@ -28,23 +30,97 @@ export function TableGrid({ tick }: Props) {
   const tableMap = new Map<TableId, Session>();
   sessions.forEach((s) => s.tableIds.forEach((t) => tableMap.set(t, s)));
 
+  const handleRemoveTable = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.confirm(`Are you sure you want to remove Table ${id}?`)) {
+      storage.setTables(tables.filter((t) => t !== id));
+    }
+  };
+
+  const handleRenameTable = (e: React.MouseEvent, oldId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const newId = prompt(`Enter new name for Table ${oldId}:`, oldId);
+    if (newId && newId.trim().toUpperCase() !== oldId) {
+      const up = newId.trim().toUpperCase();
+      if (tables.includes(up)) return toast.error("Table ID already exists");
+      
+      // Update tables list
+      storage.setTables(tables.map(t => t === oldId ? up : t));
+      
+      // Update any active session using this table
+      const sessions = sessionsApi.list();
+      sessions.forEach(s => {
+        if (s.status === "active" && s.tableIds.includes(oldId)) {
+          sessionsApi.addTables(s.id, [up]);
+          sessionsApi.removeTable(s.id, oldId);
+        }
+      });
+      toast.success(`Table ${oldId} renamed to ${up}`);
+    }
+  };
+
+  const handleMoveSession = (e: React.MouseEvent, sessionId: string, fromTable: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const free = sessionsApi.freeTables();
+    if (free.length === 0) return toast.error("No free tables available to move to.");
+    
+    const target = prompt(`Move session from ${fromTable} to which table?\nAvailable: ${free.join(", ")}`);
+    if (target && free.includes(target.trim().toUpperCase())) {
+      const to = target.trim().toUpperCase();
+      sessionsApi.addTables(sessionId, [to]);
+      sessionsApi.removeTable(sessionId, fromTable);
+      toast.success(`Moved session to Table ${to}`);
+      window.dispatchEvent(new Event("ph_sessions_changed"));
+    }
+  };
+
   return (
     <div className="grid grid-cols-3 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-9">
       {tables.map((id) => {
         const s = tableMap.get(id);
         const occupied = !!s;
-        const elapsed = s ? Date.now() - s.startedAt : 0;
+        const now = s ? (s.endedAt ?? Date.now()) : Date.now();
+        const elapsed = s ? now - s.startedAt : 0;
         const planned = s ? s.plannedDurationMin * 60_000 : 0;
-        const remaining = s ? Math.max(0, planned - elapsed) : 0;
+        const remaining = s ? planned - elapsed : 0;
         const card = (
           <div className={`glass relative overflow-hidden rounded-2xl p-4 transition group-hover:scale-[1.02] ${occupied ? "ring-1 ring-destructive/40" : "ring-1 ring-success/40"}`}>
+            {!occupied && (
+              <button 
+                onClick={(e) => handleRemoveTable(e, id)}
+                className="absolute bottom-2 right-2 rounded-full p-1.5 text-muted-foreground/40 transition hover:bg-destructive/10 hover:text-destructive active:scale-90"
+                title="Remove Table"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
             <div className="absolute right-3 top-3 flex items-center gap-1.5">
-              <span className={`h-2.5 w-2.5 rounded-full ${occupied ? "bg-destructive shadow-[0_0_12px_rgba(239,68,68,0.7)]" : "bg-success shadow-[0_0_12px_rgba(34,197,94,0.6)]"} animate-pulse`} />
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className={`h-2 rounded-full w-2 ${occupied ? "bg-destructive shadow-[0_0_12px_var(--destructive)]" : "bg-success shadow-[0_0_12px_var(--success)]"} animate-pulse`} />
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${occupied ? "text-destructive" : "text-success"}`}>
                 {occupied ? "Busy" : "Free"}
               </span>
             </div>
-            <div className="font-display text-3xl font-bold leading-none">{id}</div>
+            <div className="flex items-center justify-between">
+              <button 
+                onClick={(e) => handleRenameTable(e, id)}
+                className="font-display text-3xl font-bold leading-none hover:text-primary transition-colors"
+                title="Rename Table"
+              >
+                {id}
+              </button>
+              {occupied && (
+                <button
+                  onClick={(e) => handleMoveSession(e, s!.id, id)}
+                  className="rounded-full p-1.5 text-primary/40 transition hover:bg-primary/10 hover:text-primary active:scale-90"
+                  title="Move to another table"
+                >
+                  <MoveRight className="h-4 w-4" />
+                </button>
+              )}
+            </div>
             <div className="mt-3 space-y-1">
               {occupied ? (
                 <>
@@ -53,7 +129,7 @@ export function TableGrid({ tick }: Props) {
                     <Users className="h-3 w-3" /> {s!.adults + s!.kids} ppl
                   </div>
                   <div className="flex items-center gap-1 text-[11px] tabular-nums text-foreground">
-                    <Clock className="h-3 w-3" /> {formatDuration(remaining)}
+                    <Clock className="h-3 w-3" /> {formatDuration(elapsed)}
                   </div>
                 </>
               ) : (
