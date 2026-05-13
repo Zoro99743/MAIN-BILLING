@@ -63,7 +63,15 @@ if (typeof window !== "undefined") {
         }
       }
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      if (status === "SUBSCRIBED") {
+        console.log("Supabase Realtime: Subscribed successfully");
+      } else if (status === "CHANNEL_ERROR") {
+        console.error("Supabase Realtime: Channel error", err);
+      } else if (status === "TIMED_OUT") {
+        console.warn("Supabase Realtime: Connection timed out");
+      }
+    });
 }
 
 export const storage = {
